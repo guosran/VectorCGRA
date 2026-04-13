@@ -1,0 +1,3 @@
+Vcgra_test_std__03a__03aprocess__Vclpkg__DepSet_h921cae57__0__Slow.o: \
+ Vcgra_test_std__03a__03aprocess__Vclpkg__DepSet_h921cae57__0__Slow.cpp \
+ Vcgra_test__pch.h Vcgra_test_std__03a__03aprocess__Vclpkg.h

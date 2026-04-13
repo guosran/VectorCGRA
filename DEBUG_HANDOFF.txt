@@ -1,0 +1,345 @@
+═══════════════════════════════════════════════════════════════════════
+COMPREHENSIVE PROMPT FOR NEXT AI AGENT: Debug BiCG Kernel on VectorCGRA
+═══════════════════════════════════════════════════════════════════════
+
+IMPORTANT INSTRUCTION FROM USER:
+  "is it really ok to edit yaml file??"
+  → The user wants infrastructure/code fixes when possible, NOT yaml edits.
+  → BUT: the YAML has FUNDAMENTAL routing errors that CANNOT be fixed in
+    infrastructure. The YAML MUST be rewritten. Explain this clearly to the user.
+
+═══════════════════════════════════════════════════════════════════════
+1. PROJECT OVERVIEW
+═══════════════════════════════════════════════════════════════════════
+
+- Project: VectorCGRA — PyMTL3 CGRA simulator
+- Branch: `fulfill-compiled-kernels`
+- Location: /home/x/shiran/VectorCGRA/
+- Python: 3.8.10, venv at /home/x/shiran/VectorCGRA/venv/bin/activate
+- Test runner: pytest 7.1.3
+
+RUN COMMAND:
+  cd /home/x/shiran/VectorCGRA && source venv/bin/activate && \
+  timeout 600 pytest cgra/test/CgraRTL_bicg4x4_test_from_yaml.py::test_homogeneous_4x4_bicg_combinational_mem_access -xvs 2>&1 | tail -80
+
+═══════════════════════════════════════════════════════════════════════
+2. KERNEL: BiCG (M=4, N=4)
+═══════════════════════════════════════════════════════════════════════
+
+  for i in [0,N):        // outer loop, N=4
+      q[i] = 0
+      for j in [0,M):    // inner loop, M=4
+          a = A[i*M + j]
+          s[j] += r[i] * a
+          q[i] += a * p[j]
+
+Input data:
+  A[i][j] = (i*(j+1)) % 7 + 1
+  p[j] = (j*3) % 5 + 1
+  r[i] = (i*2) % 3 + 1
+
+Expected output:
+  s = [17, 27, 30, 26]
+  q = [12, 47, 47, 68]
+
+═══════════════════════════════════════════════════════════════════════
+3. CGRA ARCHITECTURE (4×4 Mesh)
+═══════════════════════════════════════════════════════════════════════
+
+Grid layout (Cartesian: row 0 = bottom, row 3 = top):
+  row 3: tile12  tile13  tile14  tile15
+  row 2: tile8   tile9   tile10  tile11
+  row 1: tile4   tile5   tile6   tile7
+  row 0: tile0   tile1   tile2   tile3
+
+tile_id = row * 4 + col
+
+PORT INDICES: NORTH=0, SOUTH=1, WEST=2, EAST=3
+
+CRITICAL DIRECTION CONVENTIONS:
+  tile(r,c).send_data[NORTH] → tile(r+1,c).recv_data[SOUTH]    (sends UP)
+  tile(r,c).send_data[SOUTH] → tile(r-1,c).recv_data[NORTH]    (sends DOWN)
+  tile(r,c).send_data[EAST]  → tile(r,c+1).recv_data[WEST]     (sends RIGHT)
+  tile(r,c).send_data[WEST]  → tile(r,c-1).recv_data[EAST]     (sends LEFT)
+
+  "NORTH output" = send data to the tile ABOVE
+  "SOUTH input" = receive data from the tile BELOW
+  "NORTH input" = receive data from the tile ABOVE (i.e., from that tile's SOUTH output)
+
+Proof (from cgra_helper.py line 77-82):
+  link_down = Link(tiles[r][c], tiles[r+1][c], PORT_INDEX_NORTH, PORT_INDEX_SOUTH)
+    → tile[r][c].send_data[NORTH] connects to tile[r+1][c].recv_data[SOUTH]
+  link_up = Link(tiles[r+1][c], tiles[r][c], PORT_INDEX_SOUTH, PORT_INDEX_NORTH)
+    → tile[r+1][c].send_data[SOUTH] connects to tile[r][c].recv_data[NORTH]
+
+MEMORY CONNECTIONS (from cgra_helper.py):
+  - Col 0 tiles: Memory via WEST port. tile(r,0) → mem_port r.
+      tile0: mem_port 0 (WEST)
+      tile4: mem_port 1 (WEST)
+      tile8: mem_port 2 (WEST)
+      tile12: mem_port 3 (WEST)
+  - Row 0 tiles col>0: Memory via SOUTH port. tile(0,c) → mem_port (3+c).
+      tile1: mem_port 4 (SOUTH)
+      tile2: mem_port 5 (SOUTH)
+      tile3: mem_port 6 (SOUTH)
+
+TILE INPUT CHANNEL: 1-cycle latency buffer (ChannelRTL latency=1)
+  Data sent at cycle C arrives at the receiver's routing crossbar at cycle C+1.
+  The channel is a val/rdy buffer — data held until consumed.
+
+═══════════════════════════════════════════════════════════════════════
+4. MEMORY LAYOUT
+═══════════════════════════════════════════════════════════════════════
+
+  Tile 8 (col 0, row 2): A[4×4] at base 0. Addr i*4+j. Mem port 2 (WEST).
+  Tile 1 (col 1, row 0): p[4] at base 0 (addr 0..3), s[4] at base 4 (addr 4..7). Mem port 4 (SOUTH).
+  Tile 4 (col 0, row 1): r[4] at base 0 (addr 0..3). Mem port 1 (WEST).
+  Tile 12 (col 0, row 3): q[4] at base 0 (addr 0..3). Mem port 3 (WEST).
+
+═══════════════════════════════════════════════════════════════════════
+5. FILES ALREADY MODIFIED (infrastructure fixes — DO NOT REVERT)
+═══════════════════════════════════════════════════════════════════════
+
+a) lib/opt_type.py:
+   - Added OPT_LLS_CONST = OpCodeType(95) (SHL with constant operand)
+   - Added to OPT_USES_CONST_LIST
+   - Added to OPT_SYMBOL_DICT
+
+b) fu/single/ShifterRTL.py:
+   - Added OPT_LLS_CONST handler using recv_const
+
+c) validation/script_generator.py:
+   - Added "SHL": OPT_LLS_CONST to yaml_to_VectorCGRA_map_const
+
+d) cgra/test/CgraRTL_bicg4x4_test_from_yaml.py:
+   - num_registers_per_reg_bank = 8 (was 16, caused cluster collision)
+   - MAX_CYCLES = 1500
+   - stall_threshold = 200
+   - any_started check to avoid false deadlock during config phase
+   - Packet dump print suppressed
+   - Debug printing throttled
+
+═══════════════════════════════════════════════════════════════════════
+6. ROOT CAUSE ANALYSIS: WHY THE YAML IS BROKEN
+═══════════════════════════════════════════════════════════════════════
+
+The bicg.yaml at validation/test/bicg/bicg.yaml has SYSTEMIC ROUTING ERRORS.
+The YAML was auto-generated with INCORRECT direction conventions.
+
+KEY FINDINGS:
+
+A) PHI_START BOOTSTRAP DEADLOCK:
+   Tile 4 indices 1,2: PHI_START SOUTH, $8 → NORTH
+   - SOUTH input = tile 0's NORTH output. But tile 0 only sends NORTH at step 8.
+   - PHI_START at step 1 needs SOUTH data. Step 8 > step 1, so data comes from
+     PREVIOUS iteration's step 8 — which doesn't exist for iteration 0.
+   - PHI_START with first=1 reads recv_in[in0_idx] = SOUTH port → stalls forever.
+   
+B) MISSING ROUTES (tile4 → tile0):
+   Tile 0 index 3: DATA_MOV NORTH → $0  (reads recv_data[NORTH])
+   - recv_data[NORTH] = tile4.send_data[SOUTH]
+   - BUT tile 4 NEVER sends via SOUTH port. It only sends NORTH (to tile8).
+   - tile4.send_data[NORTH] → tile8.recv_data[SOUTH], NOT tile0!
+   - RESULT: tile 0 waits forever for NORTH data that never arrives.
+
+C) DIRECTION CONFUSION:
+   tile 4's PHI_START output goes NORTH (to tile8), but the DATA consumer
+   is tile0 (which is SOUTH of tile4). The YAML author confused NORTH/SOUTH
+   for outputs.
+
+D) SYSTEMIC ISSUE:
+   tile 8 receives NORTH (from tile12) at steps 2,3,8 but tile12 has only
+   2 operations (steps 0 and 8). tile12 never sends SOUTH to tile8 at steps
+   that tile8 needs. Same pattern of broken routes exists throughout the YAML.
+
+E) TILE 9 PHI_START:
+   indices 4,5,6 also use routing ports (NORTH, WEST) as first operand,
+   with similar bootstrap/routing issues.
+
+CONCLUSION: The entire YAML needs to be REWRITTEN with correct direction
+conventions. Patching individual routes won't work because the scheduling
+depends on the routing topology. A single direction swap cascades into
+broken timing throughout the pipeline.
+
+═══════════════════════════════════════════════════════════════════════
+7. KEY ARCHITECTURE DETAILS FOR YAML GENERATION
+═══════════════════════════════════════════════════════════════════════
+
+A) PHI_START behavior (fu/single/PhiRTL.py):
+   - first=1 (iteration 0): Uses recv_in[in0_idx] ONLY. Validation:
+       recv_all_val = first & recv_in[in0_idx].val
+   - first=0 (subsequent): Uses predicate-based selection between in0 and in1.
+       recv_all_val = ~first & recv_in[in0_idx].val & recv_in[in1_idx].val
+       Both inputs must be valid!
+   - first flag cleared when ctrl_addr wraps (ctrl_addr < prev_ctrl_addr).
+   
+   PATTERN FROM WORKING spmv.yaml:
+     PHI_START always uses REGISTERS for both operands (not routing ports).
+     PHI_START second operand gets a routing crossbar prologue if it's a PORT.
+
+B) PHI_CONST behavior:
+   - first=1: Uses recv_const (from const queue)
+   - first=0: Uses recv_in[in0_idx] ONLY (no predicate check)
+   - NOT suitable for loop PHIs that need predicate-based selection!
+
+C) GRANT_ONCE (fu/single/GrantRTL.py):
+   - Sets output value and predicate=1 on FIRST execution.
+   - Subsequent executions: predicate=0 (already_grt_once flag).
+   - IS a FU operation (takes up the FU for that step).
+   - Only one GRANT_ONCE per step per tile.
+
+D) GRANT_PREDICATE:
+   - Takes two inputs, ANDs the second input's predicate onto the first.
+   - Used to propagate loop control predicates to PHI operands.
+   - IS a FU operation.
+
+E) invalid_iterations:
+   - When > 0, generates prologue packets that make the tile skip the operation
+     during the first N iterations.
+   - The prologue mechanism tells the FU and crossbars to ignore certain
+     operations during the pipeline fill phase.
+
+F) LOAD/STORE memory access:
+   - LOAD src_operands[0] = address (from FU input). Result goes to FU output.
+   - The actual memory R/W goes through to_mem_raddr/from_mem_rdata, connected
+     to the tile's memory port (WEST for col 0, SOUTH for row 0 col>0).
+   - STORE src_operands[0] = address, src_operands[1] = data.
+
+G) DATA_MOV:
+   - PORT → PORT: Uses routing crossbar ONLY (no FU needed)
+   - PORT → REG: Uses routing crossbar ONLY (no FU needed)
+   - REG → PORT: Uses register read + routing crossbar (no FU needed)
+   - Multiple DATA_MOVs can co-exist at same step with a FU operation.
+   
+H) Multiple dst_operands:
+   - A single FU operation can output to multiple ports/registers.
+   - FuOutParams[port_idx] = 1 for each active output port (multicast).
+
+I) Const queue:
+   - Operations with #imm operands consume from the const queue.
+   - Constants are preloaded in order via CMD_CONST packets.
+   - The script_generator handles this automatically from the YAML.
+
+J) Register allocation:
+   - num_registers_per_reg_bank = 8
+   - $0..$7 = cluster 1, $8..$15 = cluster 2
+   - Two clusters can be read/written independently per cycle.
+   - Collision: two registers in the same cluster can't be read/written
+     in the same cycle for different purposes.
+
+═══════════════════════════════════════════════════════════════════════
+8. WHAT THE NEXT AGENT SHOULD DO
+═══════════════════════════════════════════════════════════════════════
+
+STEP 1: Explain to the user that the YAML has fundamental routing errors
+        (direction confusion: NORTH/SOUTH swapped for outputs) and MUST
+        be rewritten. Infrastructure fixes alone cannot solve this.
+
+STEP 2: Rewrite validation/test/bicg/bicg.yaml from scratch with:
+   a) Correct NORTH/SOUTH/EAST/WEST conventions (see section 3)
+   b) PHI_START first operands as REGISTERS (initialized by GRANT_ONCE)
+   c) Correct memory port usage (col 0 → WEST, row 0 col>0 → SOUTH)
+   d) Proper inter-tile routing (producer step < consumer step, or use
+      invalid_iterations for cross-II dependencies)
+   e) No circular dependencies in the first iteration
+
+STEP 3: Suggested tile placement for the rewrite:
+   tile5 (col 1, row 1) — Central controller:
+     - j PHI, i PHI, SHL, j+1, ICMP j, NOT, ICMP i, NOT
+     - Route j/i to neighbors
+   tile0 (col 0, row 0) — Routing/predicate:
+     - GRANT_PREDICATE, route data
+   tile1 (col 1, row 0) — p/s memory:
+     - GEP(0,j), GEP(4,j), LOAD p[j], LOAD s[j], STORE s[j]
+   tile4 (col 0, row 1) — r memory + routing:
+     - GEP(0,i), LOAD r[i], route data
+   tile8 (col 0, row 2) — A memory + MUL:
+     - GEP for A[i][j], LOAD A, MUL r[i]*a
+   tile9 (col 1, row 2) — MUL + ADD:
+     - MUL a*p[j], ADD s_old+mul_ra
+   tile12 (col 0, row 3) — q memory:
+     - GEP(0,i), LOAD q[i], STORE q[i]
+   tile13 (col 1, row 3) — q accumulation:
+     - ADD q_old + mul_ap
+   tile6 (col 2, row 1) — Termination:
+     - RETURN_VOID
+
+STEP 4: After rewriting the YAML, update the test file if needed:
+   - The test file (cgra/test/CgraRTL_bicg4x4_test_from_yaml.py) may need:
+     - Updated active_tiles list
+     - Updated expected_complete_sink_out_pkg (RETURN_VOID tile)
+     - Updated kCtrlCountPerIter if II changes
+     - ADD RESULT VERIFICATION ASSERTIONS (currently missing!)
+       Read s[] from tile1 memory addrs 4-7
+       Read q[] from tile12 memory addrs 0-3
+       Compare with expected_s and expected_q
+
+STEP 5: Run simulation and debug any remaining issues.
+
+═══════════════════════════════════════════════════════════════════════
+9. REFERENCE: WORKING spmv.yaml PATTERNS
+═══════════════════════════════════════════════════════════════════════
+
+The spmv.yaml at validation/test/spmv.yaml is a WORKING kernel.
+Key patterns to follow:
+
+a) PHI_START always uses REGISTERS for both operands:
+   PHI_START $0, $8 → dst   (not PHI_START SOUTH, $8 → dst)
+
+b) GRANT_ONCE initializes registers before PHI_START:
+   Step N:   GRANT_ONCE #value → $reg
+   Step N+M: PHI_START $reg, $loopback → dst
+
+c) Multiple dst_operands for multicast:
+   PHI_START $0, $8 → EAST, NORTH, $0   (sends to 3 destinations)
+
+d) invalid_iterations for pipeline prologue:
+   Operations that depend on previous iterations use invalid_iterations: 1
+   (or higher). The FU and crossbars are prologued to skip these.
+
+e) CTRL_MOV for cross-iteration register writes:
+   CTRL_MOV EAST → $8   (with invalid_iterations: 1)
+   Writes the loopback value from a routing port into a register,
+   starting from iteration 1.
+
+═══════════════════════════════════════════════════════════════════════
+10. POTENTIAL GOTCHA: GEP 2D DETECTION
+═══════════════════════════════════════════════════════════════════════
+
+GEP node 77 in the old YAML (at tile 8) had two register operands ($8, $0).
+The script_generator detects GEPs with 2 non-IMM operands as "2D GEP"
+and may incorrectly use OPT_GEP_2D_CONST. If the new YAML has a GEP with
+two register/port operands for A[row_base + j], be aware of this.
+
+Check script_generator.py around line 822 for the 2D GEP detection logic.
+
+═══════════════════════════════════════════════════════════════════════
+11. SIMULATION PERFORMANCE NOTE
+═══════════════════════════════════════════════════════════════════════
+
+PyMTL3 simulation is VERY SLOW. ~1500 cycles took ~432 seconds.
+BiCG with 4*4=16 inner iterations needs:
+  Total steps ≈ II * 16 + prologue + epilogue ≈ 10*16 + 20 = 180 steps
+Use MAX_CYCLES = 500 for initial testing to catch deadlocks early.
+Increase to 1000-1500 if the simulation makes progress.
+
+═══════════════════════════════════════════════════════════════════════
+12. TEST FILE STRUCTURE
+═══════════════════════════════════════════════════════════════════════
+
+File: cgra/test/CgraRTL_bicg4x4_test_from_yaml.py
+
+Key sections:
+- Lines 1-60: Imports
+- Lines 61-100: TestHarness class
+- Lines 160-200: Configuration constants
+- Lines 260-330: Data preload (A, p, r, s_init, q_init into tile memories)
+- Lines 330-415: sim_bicg function (YAML loading, packet generation)
+- Lines 415-end: Simulation loop with debug output
+
+The test currently has NO result verification assertions. It "passes"
+even on deadlock because pytest sees no assertion failures.
+
+═══════════════════════════════════════════════════════════════════════
+END OF PROMPT
+═══════════════════════════════════════════════════════════════════════

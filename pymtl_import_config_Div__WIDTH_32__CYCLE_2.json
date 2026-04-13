@@ -1,0 +1,27 @@
+{
+    "ImportPassName": "VerilogVerilatorImportPass",
+    "verilog_hash": "ed645ee307176d626a3cb06710b2f14d3e293ebf90bdbb4df397573e1279c8a85d4bd25ca895a65fcb571ea7728d741a6317d20452d199166568ab3f9c83c666",
+    "vl_line_trace": false,
+    "vl_coverage": false,
+    "vl_line_coverage": false,
+    "vl_toggle_coverage": false,
+    "vl_mk_dir": "obj_dir_Div__WIDTH_32__CYCLE_2",
+    "vl_enable_assert": true,
+    "vl_W_lint": true,
+    "vl_W_style": true,
+    "vl_W_fatal": true,
+    "vl_Wno_list": [
+        "WIDTH"
+    ],
+    "vl_xinit": "zeros",
+    "vl_trace": false,
+    "vl_trace_timescale": "10ps",
+    "vl_trace_cycle_time": 100,
+    "vl_trace_on_demand": false,
+    "vl_trace_on_demand_portname": "",
+    "c_flags": "",
+    "c_include_path": [],
+    "c_srcs": [],
+    "ld_flags": "",
+    "ld_libs": ""
+}

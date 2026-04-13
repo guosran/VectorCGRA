@@ -1,0 +1,67 @@
+你是接续开发 VectorCGRA 的 AI agent。请通读本文件后再改代码；优先用仓库内工具自跑命令，不要只给用户「建议你运行」。
+
+================================================================================
+目标（成功标准）
+================================================================================
+1. `venv/bin/python -m pytest cgra/test/CgraRTL_relu4x4_test_from_yaml.py::test_homogeneous_4x4_relu_combinational_mem_access_return -q --tb=short` 通过。
+2. 判定依据：测试里的 **内存黄金校验** + **`model.done()` / CMD_COMPLETE**，不是仅 `check_flow`。
+3. 默认仿真上限：`RELU_TEST_MAX_CYCLES` 默认 500，可被 `RELU_TEST_MAX_CYCLES_CAP`（默认 2000）封顶；需要更长时可显式设环境变量。
+
+================================================================================
+当前已知状态（截至 2026-04-08）
+================================================================================
+- `python3 check_flow_v2.py validation/test/relu.yaml`：**0 NO_PRODUCER，0 MISMATCH**。
+- **PyMTL + Verilator 路径上 pytest 仍失败**：常见为 **cycle 300 左右** 的 **frozen-tail 死锁启发式**（`cgra/test/CgraRTL_relu4x4_test_from_yaml.py` 里 `_relu_trace_metrics_from_jsonl`）；根因更像是 **mesh 背压 / 各 tile 控制 PC 异步推进**，不是静态流图单独能完全描述。
+- 曾尝试把 **LOAD 挪到 tile 6**（histogram 式 GEP+$0+LOAD、T7 只传数据）：仿真出现 **tile 2/3 长期 NAH** 等更差行为，**已回退**；当前 `relu.yaml` 又是 **T3 上 LOAD、T6 上 GEP、T7 中继地址** 的结构。
+
+================================================================================
+关键文件
+================================================================================
+- `validation/test/relu.yaml` — ReLU 4×4 调度与路由。
+- `check_flow_v2.py` — 带 **1-cycle mesh 延迟** 的静态检查；**竖直方向规则已与 `cgra/CgraRTL.py` 对齐**：
+  - `tile[i].send[NORTH] //= tile[i+width].recv[SOUTH]`
+  - `tile[i].send[SOUTH] //= tile[i-width].recv[NORTH]`
+  因此：**本 tile 的 `recv NORTH` 由「下方邻居」的 `dst SOUTH` 驱动；`recv SOUTH` 由「上方邻居」的 `dst NORTH` 驱动。**
+- `cgra/CgraRTL.py` — 实际 mesh 连线，与 YAML 端口语义对账时以这里为准。
+- `cgra/test/CgraRTL_relu4x4_test_from_yaml.py` — 分段仿真、`flush_trace_logger`、死锁里程碑、`RELU_TEST_*` 环境变量。
+- `lib/trace_logger.py` — JSONL 字段；大文件请 **流式** 读（`tail` / 逐行 Python），不要整文件读入上下文。
+- `trace_output/trace_relu4x4_4x4_Mesh.jsonl` — 主 trace；路径也可能写在 `trace_output/relu4x4_last_trace_path.txt`。
+- `trace_output/RELU_test_progress.md` — 人工进度与环境变量说明；其中「Mesh 方向」小节若仍写「T6 须用 NORTH」可能与 **当前 T6 `DATA_MOV src SOUTH`** 实现不一致，**以 CgraRTL + yaml 为准**。
+
+================================================================================
+当前 relu 数据通路要点（便于你继续拆死锁）
+================================================================================
+- **Tile 6**：`index_per_ii: 1`，`DATA_MOV` **`src SOUTH`** → `$0`（从 **tile 2** 经竖直链路取循环变量 `i`）；**`index 2` `GEP`** → **`WEST` + `EAST`**（T5 与 T7）。
+- **Tile 7**：`DATA_MOV` **`WEST` → `SOUTH`**，给 **tile 3** 顶行 **`LOAD src NORTH`** 送地址（`check_flow` 对顶行 NORTH 有「生产者在下方」的特殊规则）。
+- **Tile 3**：**`ICMP` + `LOAD`**；顶行 **禁止** `dst SOUTH`（harness 常 `rdy=0`）；曾去掉 `dst NORTH` 以避免与 T7 形成环。
+- **Tile 5**：**GEP 地址** 的 `EAST→$0` 已单独放在 **`index 3` `time_step 3`**，与 T6@2 的 WEST 对齐；勿再与 `time_step 6` 的 op 绑在同一拍导致静态上无生产者。
+- **风险点（历史结论）**：**GEP 双扇出** 一路阻塞可拖死整 tile；**T2↔T3↔T6↔T7** 异步 PC 下易形成 **val/rdy 环**；**顶行 / 边界** 与 `TestHarness` 行为要一致。
+
+================================================================================
+死锁检查与环境变量（调试时）
+================================================================================
+- 默认 **每 `RELU_TEST_DEADLOCK_EVERY`（100）cycle** 做一次 frozen-tail 检查，直到 `max_cycles`。
+- `RELU_TEST_NO_PROBE_PHASE=1`：跳过里程碑，一次性跑到上限（**可能极久或真死锁时挂住**，慎用）。
+- 详见 `trace_output/RELU_test_progress.md` 表格。
+
+================================================================================
+副作用提醒
+================================================================================
+- `check_flow_v2.py` 的竖直规则是 **全局** 的；若跑 `validation/test/spmv.yaml`，可能出现 **新的 MISMATCH**（与旧脚本假设不一致）。若动 `check_flow_v2.py`，应用 **relu + spmv** 或项目约定 yaml 回归。
+
+================================================================================
+建议的下一步（按优先级）
+================================================================================
+1. 跑 pytest 复现，用 **JSONL 最后 64～100 行** 看 `tiles[*].ctrl_mem`、`recv_data`/`send_data`（端口顺序 N,S,W,E = 0..3），定位 **谁先 val=1 & rdy=0**。
+2. 若确认 **GEP 双扇出** 参与死锁：尝试 **单扇出 + 寄存器/第二次 DATA_MOV**（参考 `validation/test/histogram.yaml` 同 tile GEP→$0→LOAD），或改 **T5 取址路径**，减少 T6 同时压 **WEST+EAST**。
+3. 只有在证明 **II 周期内尾部签名合法重复** 时，才放宽 `_relu_trace_metrics_from_jsonl` 的 frozen 启发式；否则应先修硬件/调度。
+4. 通过后更新 `trace_output/RELU_test_progress.md` 的「当前状态」与 **Mesh 方向** 描述，避免误导后续 agent。
+
+================================================================================
+常用命令
+================================================================================
+cd /home/x/shiran/VectorCGRA
+python3 check_flow_v2.py validation/test/relu.yaml
+venv/bin/python -m pytest cgra/test/CgraRTL_relu4x4_test_from_yaml.py -q --tb=short
+# 更长仿真示例：
+# RELU_TEST_MAX_CYCLES=2000 venv/bin/python -m pytest cgra/test/CgraRTL_relu4x4_test_from_yaml.py -q --tb=short

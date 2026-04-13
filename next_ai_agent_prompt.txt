@@ -1,0 +1,96 @@
+Task: Debug SpMV RTL Simulation Deadlock on VectorCGRA
+
+Project Overview
+You are working on /home/x/shiran/VectorCGRA, a PyMTL3-based CGRA (Coarse-Grained Reconfigurable Array) RTL project, branch fulfill-compiled-kernels. The goal is to get the SpMV (Sparse Matrix-Vector Multiplication) kernel running on RTL simulation. A working FIR filter test exists as reference at cgra/test/CgraRTL_fir4x4_test_from_yaml.py.
+
+Python environment: source /home/x/shiran/VectorCGRA/cgra_env/bin/activate
+
+What Has Been Done (All Working)
+1. Added missing opcodes to lib/opt_type.py: OPT_LT_CONST=91, OPT_GT_CONST=92, OPT_AND_CONST=93, OPT_OR_CONST=94
+2. Added FU implementations in fu/single/CompRTL.py (LT_CONST, GT_CONST), fu/single/LogicRTL.py (AND_CONST, OR_CONST), fu/single/PhiRTL.py (OPT_CONST)
+3. Extensively fixed validation/script_generator.py (~983 lines): two-pass processing, STORE src swap, register merge logic, full prologue handling
+4. Rewrote SpMV test at cgra/test/CgraRTL_spmv_test_from_yaml.py modeled after the working FIR test
+5. All static verification passes: verify_ctrl.py (ctrl packets match YAML), verify_routing_deps.py (routing dependencies correct), check_flow_v2.py (inter-tile data flow correct with 1-cycle latency)
+
+Current Problem: Simulation Deadlocks
+Running the test:
+cd /home/x/shiran/VectorCGRA && source cgra_env/bin/activate
+pytest cgra/test/CgraRTL_spmv_test_from_yaml.py -xvs 2>&1 | tee /tmp/spmv_trace.log
+
+The simulation starts, all 15 active tiles begin iterating control, but then ALL tiles get stuck with routing_crossbar_done=0. No tile can advance.
+
+Architecture Summary (Critical Details)
+
+CGRA: 4×4 tiles, compiled_ii=15 (15 control steps per iteration), 15 active cores (0-14), core 15 unused. tile_id = col + row*4. Row 0 = bottom, Row 3 = top.
+
+TileRTL (tile/TileRTL.py): Each tile contains:
+- CtrlMemDynamicRTL: Stores 15 control words, cycles through them. times counter tracks completed steps. Advances when send_ctrl.rdy & send_ctrl.val.
+- Routing crossbar (CrossbarRTL, 8 inputs → 8 outputs): inputs 0-3 = tile inports (N,S,W,E), inputs 4-7 = register banks. Outputs 0-3 = tile outports (N,S,W,E), outputs 4-7 = register cluster lanes → FU.
+- FU crossbar (CrossbarRTL): routes FU outputs to tile outports and register cluster.
+- FlexibleFuRTL: The functional unit.
+- RegisterClusterRTL: 4 banks of 8 registers each.
+- ChannelRTL (latency=1): Each tile inport has a 2-entry buffered queue providing 1-cycle latency.
+- Three done-latching signals: element_done, routing_crossbar_done, fu_crossbar_done. The ctrl advances ONLY when all three are done: ctrl_mem.send_ctrl.rdy = (element.recv_opt.rdy | element_done) & (routing_crossbar.recv_opt.rdy | routing_crossbar_done) & (fu_crossbar.recv_opt.rdy | fu_crossbar_done).
+
+CrossbarRTL (noc/CrossbarRTL.py, 281 lines): ALL-OR-NOTHING delivery. recv_opt.rdy requires:
+1. all_send_accepted: All required output sends accepted by downstream.
+2. reduce_and(recv_valid_or_prologue_allowing_vector): ALL required input data present (or bypassed by prologue).
+
+For each output i, in_dir[i] (from crossbar_outport[i]) specifies which input feeds it. If in_dir[i] > 0, that input must have val=1 (data present), otherwise the crossbar blocks.
+
+Prologue mechanism: For the first iteration, some operations have no upstream data yet (e.g., PHI_START). The prologue counter per (step, inport) lets the crossbar skip waiting for that input during the first N iterations. Configured via CMD_CONFIG_PROLOGUE_ROUTING_CROSSBAR, CMD_CONFIG_PROLOGUE_FU, CMD_CONFIG_PROLOGUE_FU_CROSSBAR packets.
+
+Select encoding: 0=nothing, 1=input[0](N), 2=input[1](S), 3=input[2](W), 4=input[3](E), 5=input[4](reg0), ...
+
+Port directions: PORT_NORTH=0, PORT_SOUTH=1, PORT_WEST=2, PORT_EAST=3. In CgraRTL mesh: tile[i].send_data[NORTH] → tile[i+width].recv_data[SOUTH].
+
+The Stuck State (from trace at ~50 cycles)
+Every tile has routing_crossbar_done=0. Here are the stuck steps (raddr = step being attempted):
+
+t0  raddr=6 GRT_PRED    routing=0-0-0-0-0-1-0-0 ed=0 → needs N(from t4↓) on lane1
+t1  raddr=6 LD          routing=0-0-0-0-1-0-0-0 ed=1 → needs N(from t5↓) on lane0
+t2  raddr=4 ADD_CONST   routing=0-0-0-3-1-0-0-0 ed=1 → needs W(from t1→E) pass-thru + N(from t6↓) on lane0
+t3  raddr=3 GRT_ONCE    routing=0-0-0-0-3-0-0-0 ed=1 → needs W(from t2→E) on lane0
+t4  raddr=5 NOT         routing=0-0-0-0-2-2-0-0 ed=0 → needs S(from t0↑) on lane0,lane1
+t5  raddr=3 ADD_CONST   routing=0-0-0-0-0-2-0-0 ed=1 → needs S(from t1↑) on lane1
+t6  raddr=8 ADD_CONST   routing=0-0-0-0-3-2-0-0 ed=0 → needs W(from t5→E) + S(from t2↑) on lanes
+t7  raddr=1 PAS         routing=0-0-0-0-2-0-0-0 ed=0 → needs S(from t3↑) on lane0
+t8  raddr=? NAH         routing=0-0-0-0-4-0-0-0 ed=1 → needs E(from t9←) on lane0
+t9  raddr=8 MUL         routing=0-5-0-0-2-1-4-0 ed=1 → needs S(from t5↑), N(from t13↓), E(from t10←)
+t10 raddr=? NAH         routing=0-0-0-0-2-0-0-0 ed=1 → needs S(from t6↑) on lane0
+t11 raddr=2 ADD_CONST   routing=0-0-0-0-2-0-0-0 ed=0 → needs S(from t7↑) on lane0
+t12 raddr=2 LD          routing=0-0-0-0-2-0-0-0 ed=0 → needs S(from t8↑) on lane0
+t13 raddr=0 NAH         routing=0-0-0-0-2-0-0-0 ed=1 → needs S(from t9↑) on lane0
+t14 raddr=7 NAH         routing=0-3-0-0-0-0-0-0 ed=1 → needs W→S pass-thru from t13→E
+
+the circular deadlocks:
+
+t0(s6) needs t4.SOUTH ←→ t4(s5) needs t0.NORTH  [CIRCULAR]
+t1(s6) needs t5.SOUTH ←→ t5(s3) needs t1.NORTH  [CIRCULAR]
+t2(s4) needs t6.SOUTH ←→ t6(s8) needs t2.NORTH  [CIRCULAR]
+t3(s3) needs t2.EAST → t2 stuck
+t8 needs t9.WEST → t9(s8) needs t5.NORTH → t5 stuck
+t10 needs t6.NORTH → t6 stuck
+
+Critical Investigation Path
+
+Step 1: Read noc/CrossbarRTL.py thoroughly. Understand exactly how recv_data[i].rdy is computed. The key question: when the routing crossbar is on step X (which doesn't need inport N), and data arrives at inport N (which is needed by step X+2), does the channel hold the data until step X+2? Or does something go wrong?
+
+Step 2: Check if NAH steps with routing requirements are the problem. Look at steps like t6 s5 NAH recv=[N->lane0] send=[S(t2)[reg0]] and t6 s6 NAH recv=[S->outN,E->outW] send=[N(t10)[portS],S(t2)[reg0],W(t5)[portE]]. These NAH steps have routing — this means the routing crossbar blocks waiting for input data, even though the FU (element) immediately completes NAH. Is the script_generator incorrectly adding routing to NAH steps, or is this correct but the routing crossbar's all-or-nothing behavior creates deadlocks?
+
+Step 3: Compare FIR vs SpMV prologue patterns. Run the same data flow analysis on FIR to see if FIR has similar circular dependencies and how prologues break them. The FIR test works, so its prologue pattern is correct.
+
+Step 4: Check if the routing crossbar recv_data[i].rdy creates a problem where data in the channel can't be delivered because the crossbar isn't ready for it, then the data gets "stale" or blocks new data. The channel has 2 entries — if it fills up, the upstream tile's outport blocks, causing cascading deadlocks.
+
+Step 5: If the root cause is in CrossbarRTL.py's blocking behavior combined with the script_generator's routing assignments, the fix is likely in validation/script_generator.py — either adding missing prologues, or restructuring how routing is assigned to steps to avoid circular dependencies.
+
+Important Notes
+- The YAML files and script_generator output have been verified to be correct at the logical level.
+- The hardware (RTL) is assumed to be correct since FIR works.
+- The bug is almost certainly in validation/script_generator.py's control packet generation — specifically prologues, or how routing is assigned to steps (especially NAH steps with routing), or some subtle interaction with the all-or-nothing crossbar behavior.
+- When running commands, always activate the virtualenv first: source /home/x/shiran/VectorCGRA/cgra_env/bin/activate
+
+Reference: Working FIR Test
+pytest cgra/test/CgraRTL_fir4x4_test_from_yaml.py -xvs
+
+This uses validation/test/fir.yaml with ii=5. Compare its prologue patterns and data flow to understand what makes it work.

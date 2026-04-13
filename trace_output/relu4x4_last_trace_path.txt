@@ -1,0 +1,1 @@
+/home/x/shiran/VectorCGRA/trace_output/trace_relu4x4_4x4_Mesh.jsonl

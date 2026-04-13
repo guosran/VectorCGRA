@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform linux -- Python 3.8.10, pytest-7.1.3, pluggy-1.5.0
+rootdir: /home/x/shiran/VectorCGRA, configfile: pytest.ini
+plugins: hypothesis-6.113.0, pymtl3-3.1.13
+collected 1 item
+
+cgra/test/CgraRTL_spmv_test_from_yaml.py 
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+/home/x/shiran/VectorCGRA/venv/lib/python3.8/site-packages/pymtl3/datatypes/PythonBits.py:21: KeyboardInterrupt
+(to show a full traceback on KeyboardInterrupt use --full-trace)
+======================= no tests ran in 78.88s (0:01:18) =======================

@@ -1,0 +1,3 @@
+Vcgra_test_std__03a__03asemaphore__Vclpkg__Slow.o: \
+ Vcgra_test_std__03a__03asemaphore__Vclpkg__Slow.cpp Vcgra_test__pch.h \
+ Vcgra_test__Syms.h Vcgra_test_std__03a__03asemaphore__Vclpkg.h

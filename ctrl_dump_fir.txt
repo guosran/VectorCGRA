@@ -1,0 +1,150 @@
+
+=== Tile 4 (col=0, row=1) ===
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 1, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[1, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: GRT_PRED     fu_in=[2, 1, 3, 4] routing=[0, 0, 0, 0, 0, 4, 0, 0] fu_xbar=[1, 0, 0, 0, 0, 0, 0, 0] rr=[1, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  PROLOGUE_FU addr=2
+  PROLOGUE_FU_XBAR addr=2
+  PROLOGUE_ROUTING_XBAR addr=2 routing=[1, 0, 0, 0, 0, 0, 0, 0]
+  PROLOGUE_FU addr=3
+  PROLOGUE_FU_XBAR addr=3
+  PROLOGUE_ROUTING_XBAR addr=3 routing=[4, 0, 0, 0, 0, 0, 0, 0]
+  LAUNCH
+
+=== Tile 8 (col=0, row=2) ===
+  CONST: data=0, addr=0
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[0, 4, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: GRT_ONCE_C   fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 1, 0, 0, 0] rr=[0, 0, 0, 0] wr=[2, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: PHI_START    fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 2, 0, 0] fu_xbar=[0, 0, 0, 1, 0, 0, 0, 0] rr=[1, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  PROLOGUE_FU addr=1
+  PROLOGUE_FU_XBAR addr=1
+  PROLOGUE_ROUTING_XBAR addr=1 routing=[4, 0, 0, 0, 0, 0, 0, 0]
+  PROLOGUE_ROUTING_XBAR addr=4 routing=[2, 0, 0, 0, 0, 0, 0, 0]
+  LAUNCH
+
+=== Tile 1 (col=1, row=0) ===
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[4, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  PROLOGUE_FU addr=1
+  PROLOGUE_FU_XBAR addr=1
+  PROLOGUE_ROUTING_XBAR addr=1 routing=[4, 0, 0, 0, 0, 0, 0, 0]
+  LAUNCH
+
+=== Tile 5 (col=1, row=1) ===
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 1, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[1, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: ADD          fu_in=[2, 1, 3, 4] routing=[0, 0, 0, 0, 0, 2, 0, 0] fu_xbar=[1, 0, 1, 0, 0, 0, 0, 0] rr=[1, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: 0x23         fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 1, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  PROLOGUE_FU addr=1
+  PROLOGUE_FU_XBAR addr=1
+  PROLOGUE_ROUTING_XBAR addr=1 routing=[1, 0, 0, 0, 0, 0, 0, 0]
+  PROLOGUE_FU addr=2
+  PROLOGUE_FU_XBAR addr=2
+  PROLOGUE_ROUTING_XBAR addr=2 routing=[2, 0, 0, 0, 0, 0, 0, 0]
+  PROLOGUE_FU addr=4
+  PROLOGUE_FU_XBAR addr=4
+  PROLOGUE_ROUTING_XBAR addr=4 routing=[1, 0, 0, 0, 0, 0, 0, 0]
+  LAUNCH
+
+=== Tile 9 (col=1, row=2) ===
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: NAH          fu_in=[1, 2, 3, 4] routing=[0, 3, 4, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: GRT_PRED     fu_in=[2, 1, 3, 4] routing=[0, 0, 0, 0, 0, 2, 0, 0] fu_xbar=[0, 1, 0, 0, 0, 0, 0, 0] rr=[1, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 4, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[1, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  PROLOGUE_FU addr=0
+  PROLOGUE_FU_XBAR addr=0
+  PROLOGUE_ROUTING_XBAR addr=0 routing=[3, 0, 0, 0, 0, 0, 0, 0]
+  PROLOGUE_ROUTING_XBAR addr=0 routing=[4, 0, 0, 0, 0, 0, 0, 0]
+  PROLOGUE_FU addr=3
+  PROLOGUE_FU_XBAR addr=3
+  PROLOGUE_ROUTING_XBAR addr=3 routing=[2, 0, 0, 0, 0, 0, 0, 0]
+  LAUNCH
+
+=== Tile 2 (col=2, row=0) ===
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: MUL          fu_in=[2, 1, 3, 4] routing=[0, 0, 0, 0, 0, 4, 0, 0] fu_xbar=[0, 0, 1, 0, 0, 0, 0, 0] rr=[1, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: LD           fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 1, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 1, 0, 0, 0] rr=[0, 0, 0, 0] wr=[2, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  PROLOGUE_FU addr=0
+  PROLOGUE_FU_XBAR addr=0
+  PROLOGUE_ROUTING_XBAR addr=0 routing=[4, 0, 0, 0, 0, 0, 0, 0]
+  LAUNCH
+
+=== Tile 6 (col=2, row=1) ===
+  CONST: data=0, addr=0
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: ADD_CONST    fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 1, 0, 0, 0] fu_xbar=[0, 1, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  LAUNCH
+
+=== Tile 10 (col=2, row=2) ===
+  CONST: data=1, addr=0
+  CONST: data=32, addr=0
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: GRT_PRED     fu_in=[2, 1, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 1, 0, 0, 0] rr=[1, 1, 0, 0] wr=[2, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: PHI_START    fu_in=[2, 1, 3, 4] routing=[0, 0, 0, 0, 0, 4, 0, 0] fu_xbar=[0, 1, 0, 1, 1, 0, 0, 0] rr=[1, 0, 0, 0] wr=[2, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: ADD_CONST    fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 1, 1, 0, 0] rr=[1, 0, 0, 0] wr=[2, 2, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: EQ_CONST     fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 1, 0, 1, 0, 0, 0] rr=[1, 0, 0, 0] wr=[2, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: NOT          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 1, 0, 1, 0, 0, 0] rr=[1, 0, 0, 0] wr=[2, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  PROLOGUE_FU addr=0
+  PROLOGUE_FU_XBAR addr=0
+  LAUNCH
+
+=== Tile 3 (col=3, row=0) ===
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: LD           fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 1, 0, 0, 0] fu_xbar=[0, 0, 1, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  LAUNCH
+
+=== Tile 7 (col=3, row=1) ===
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: NAH          fu_in=[1, 2, 3, 4] routing=[0, 1, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  LAUNCH
+
+=== Tile 11 (col=3, row=2) ===
+  CONST: data=0, addr=0
+  CONST: data=0, addr=0
+  CONFIG_COUNT_PER_ITER
+  CONFIG_TOTAL_CTRL_COUNT
+  addr= 0: GRT_ONCE_C   fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 1, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 1: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 2: ADD_CONST    fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 3, 0, 0, 0] fu_xbar=[0, 1, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 3: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  addr= 4: NAH          fu_in=[1, 2, 3, 4] routing=[0, 0, 0, 0, 0, 0, 0, 0] fu_xbar=[0, 0, 0, 0, 0, 0, 0, 0] rr=[0, 0, 0, 0] wr=[0, 0, 0, 0] wi=[0, 0, 0, 0] ri=[0, 0, 0, 0]
+  LAUNCH
