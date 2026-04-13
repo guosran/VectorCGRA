@@ -45,7 +45,8 @@ class DataMemControllerRTL(Component):
                 multi_cgra_columns = 2,
                 num_tiles = 16,
                 mem_access_is_combinational = True,
-                idTo2d_map = {0: [0, 0]}):
+                idTo2d_map = {0: [0, 0]},
+                per_tile_data_mem_size = 0):
 
     CgraPayloadType = NocPktType.get_field_type(kAttrPayload)
     DataType = CgraPayloadType.get_field_type(kAttrData)
@@ -150,6 +151,18 @@ class DataMemControllerRTL(Component):
       s.idTo2d_x_lut[cgra_id] //= XType(xy[0])
       s.idTo2d_y_lut[cgra_id] //= YType(xy[1])
 
+    # Per-tile address offset for local memory emulation.
+    # When per_tile_data_mem_size > 0, each tile port i sees its own
+    # independent address space [0, per_tile_data_mem_size) mapped to
+    # physical addresses [i*per_tile_data_mem_size, (i+1)*per_tile_data_mem_size).
+    s.per_tile_offset = per_tile_data_mem_size
+    s.rd_addr_offset = [Wire(AddrType) for _ in range(num_rd_tiles)]
+    s.wr_addr_offset = [Wire(AddrType) for _ in range(num_wr_tiles)]
+    for i in range(num_rd_tiles):
+      s.rd_addr_offset[i] //= AddrType(i * per_tile_data_mem_size)
+    for i in range(num_wr_tiles):
+      s.wr_addr_offset[i] //= AddrType(i * per_tile_data_mem_size)
+
     # Connections.
     for i in range(num_banks_per_cgra):
       s.read_crossbar.send[i] //= s.memory_wrapper[i].recv_rd
@@ -166,6 +179,9 @@ class DataMemControllerRTL(Component):
 
       for i in range(num_rd_tiles):
         recv_raddr = s.recv_raddr[i].msg
+        # Apply per-tile address offset for local memory emulation.
+        if per_tile_data_mem_size > 0:
+          recv_raddr = recv_raddr + s.rd_addr_offset[i]
         # Calculates the target bank index for load.
         if (recv_raddr >= s.address_lower) & (recv_raddr <= s.address_upper):
           bank_index_load_local = trunc((recv_raddr - s.address_lower) >> per_bank_addr_nbits, XbarOutRdType)
@@ -196,6 +212,9 @@ class DataMemControllerRTL(Component):
 
       for i in range(num_wr_tiles):
         recv_waddr = s.recv_waddr[i].msg
+        # Apply per-tile address offset for local memory emulation.
+        if per_tile_data_mem_size > 0:
+          recv_waddr = recv_waddr + s.wr_addr_offset[i]
         # Calculates the target bank index for store.
         if (recv_waddr >= s.address_lower) & (recv_waddr <= s.address_upper):
           bank_index_store_local = trunc((recv_waddr - s.address_lower) >> per_bank_addr_nbits, XbarOutWrType)

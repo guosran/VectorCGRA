@@ -402,8 +402,7 @@ def sim_bicg(cmdline_opts, mem_access_is_combinational):
                                     RegIdxType = RegIdxType,
                                     CtrlAddrType = CtrlAddrType,
                                     DataAddrType = DataAddrType,
-                                    num_registers_per_reg_bank = num_registers_per_reg_bank,
-                                    gep_stride = RowStride)
+                                    num_registers_per_reg_bank = num_registers_per_reg_bank)
 
   src_opt_pkt0_ = script_factory.makeVectorCGRAPkts()
 
@@ -473,7 +472,7 @@ def sim_bicg(cmdline_opts, mem_access_is_combinational):
 
   trace_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'trace_output')
   trace_file = os.path.join(trace_dir, 'trace_bicg4x4_4x4_Mesh.jsonl')
-  init_trace_logger(trace_file, x_tiles, y_tiles, "Mesh", cgra_id)
+  trace_logger = init_trace_logger(trace_file, x_tiles, y_tiles, "Mesh", cgra_id)
 
   # Active tiles for BiCG: cores 0,1,2,4,5,6,8,9,12,13
   # Flat tile indices: 0,1,2,4,5,6,8,9,12,13
@@ -497,6 +496,7 @@ def sim_bicg(cmdline_opts, mem_access_is_combinational):
   MAX_CYCLES = 2000
   for cycle in range(MAX_CYCLES):
     th.sim_tick()
+    trace_logger.log_cycle(th.dut)
 
     # Collect state for all active tiles
     cur_state = {}
@@ -648,6 +648,118 @@ def sim_bicg(cmdline_opts, mem_access_is_combinational):
         print(f"  tile {tid:2d}: active {first_cyc}..{last_cyc} "
               f"({wall_span} cycles), times={last_times}, "
               f"effective_rtl_ii = {effective_ii:.2f}")
+  print()
+
+  # -----------------------------------------------------------------------
+  # Memory Dump (post-simulation)
+  # -----------------------------------------------------------------------
+  print("\n=== Memory Dump (shared global memory banks) ===")
+  num_banks = num_banks_per_cgra
+  for b in range(num_banks):
+    wrapper = th.dut.data_mem.memory_wrapper[b]
+    regs = wrapper.memory.regs
+    print(f"\n  Bank {b} ({len(regs)} entries):")
+    # Print non-zero entries
+    nz_entries = []
+    for addr_idx in range(len(regs)):
+      reg = regs[addr_idx]
+      data_val = int(reg.payload)
+      pred = int(reg.predicate)
+      if data_val != 0 or pred != 0:
+        # Convert to signed 32-bit if needed
+        if data_val >= (1 << (data_bitwidth - 1)):
+          signed_val = data_val - (1 << data_bitwidth)
+        else:
+          signed_val = data_val
+        nz_entries.append((addr_idx, data_val, signed_val, pred))
+    for addr_idx, uval, sval, pred in nz_entries:
+      print(f"    [{addr_idx:3d}] = {sval:10d} (0x{uval:08x}, pred={pred})")
+    if not nz_entries:
+      print(f"    (all zeros)")
+
+  # Cross-reference with expected outputs
+  print("\n=== Expected vs Actual Results (shared memory limitations apply) ===")
+  print(f"  expected_s = {expected_s}")
+  print(f"  expected_q = {expected_q}")
+
+  # Try reading from bank 0 (primary bank) at expected addresses:
+  print("\n  Checking global memory addresses 0..15 (bank 0):")
+  wrapper0 = th.dut.data_mem.memory_wrapper[0]
+  regs0 = wrapper0.memory.regs
+  for addr in range(min(16, len(regs0))):
+    reg = regs0[addr]
+    data_val = int(reg.payload)
+    if data_val >= (1 << (data_bitwidth - 1)):
+      signed_val = data_val - (1 << data_bitwidth)
+    else:
+      signed_val = data_val
+    label = ""
+    if BaseS <= addr < BaseS + M:
+      label = f"  ← s[{addr - BaseS}]? (expected {expected_s[addr - BaseS]})"
+    if BaseQ <= addr < BaseQ + N:
+      label += f"  ← q[{addr - BaseQ}]? (expected {expected_q[addr - BaseQ]})"
+    if BaseP <= addr < BaseP + M:
+      label += f"  ← p[{addr - BaseP}]={p_values[addr - BaseP]}"
+    if BaseR <= addr < BaseR + N:
+      label += f"  ← r[{addr - BaseR}]={r_values[addr - BaseR]}"
+    print(f"    [{addr:3d}] = {signed_val:10d}{label}")
+
+  # Also check A addresses (sparse with stride 32)
+  print("\n  Checking A matrix addresses (stride 32):")
+  for i in range(min(3, N)):  # Just first 3 rows
+    for j in range(M):
+      addr = BaseA + i * RowStride + j
+      if addr < len(regs0):
+        reg = regs0[addr]
+        data_val = int(reg.payload)
+        if data_val >= (1 << (data_bitwidth - 1)):
+          signed_val = data_val - (1 << data_bitwidth)
+        else:
+          signed_val = data_val
+        print(f"    A[{i}][{j}] @ [{addr:3d}] = {signed_val:10d} (expected {A_values[i][j]})")
+
+  # Also check bank 1 if it has non-zero data
+  if num_banks > 1:
+    wrapper1 = th.dut.data_mem.memory_wrapper[1]
+    regs1 = wrapper1.memory.regs
+    print(f"\n  Bank 1 addresses 0..15:")
+    for addr in range(min(16, len(regs1))):
+      reg = regs1[addr]
+      data_val = int(reg.payload)
+      if data_val >= (1 << (data_bitwidth - 1)):
+        signed_val = data_val - (1 << data_bitwidth)
+      else:
+        signed_val = data_val
+      if data_val != 0:
+        print(f"    [{addr:3d}] = {signed_val:10d} (0x{data_val:08x})")
+
+  # -----------------------------------------------------------------------
+  # Stall Pattern Analysis
+  # -----------------------------------------------------------------------
+  print("\n=== Stall Pattern Analysis ===")
+  # For each tile, identify which PC addresses (ctrl steps) cause stalls
+  # A stall occurs when the tile is active but PC doesn't advance
+  for tid in sorted(active_tiles.keys()):
+    trace = ii_trace[tid]
+    stall_at_addr = {}  # raddr -> count of cycles stalled at that address
+    prev_entry = None
+    for entry in trace:
+      cyc, times, raddr, val, rdy, started = entry
+      if started and prev_entry is not None:
+        prev_cyc, prev_times, prev_raddr, prev_val, prev_rdy, prev_started = prev_entry
+        if prev_started and raddr == prev_raddr and times == prev_times:
+          # Stalled: same PC and same times
+          stall_at_addr[raddr] = stall_at_addr.get(raddr, 0) + 1
+      prev_entry = entry
+    total_stalls = sum(stall_at_addr.values())
+    if stall_at_addr:
+      sorted_stalls = sorted(stall_at_addr.items(), key=lambda x: -x[1])
+      top5 = sorted_stalls[:5]
+      top5_str = ", ".join([f"step{a}:{c}" for a, c in top5])
+      print(f"  tile {tid:2d}: {total_stalls} total stalls. Top stall steps: {top5_str}")
+    else:
+      print(f"  tile {tid:2d}: no stalls detected")
+
   print()
 
 

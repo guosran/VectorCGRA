@@ -116,7 +116,7 @@ class TileRTL(Component):
 
     # The `tile_in_channel` indicates the outport channels that are
     # connected to the next tiles.
-    s.tile_in_channel = [ChannelRTL(DataType, latency = 1)
+    s.tile_in_channel = [ChannelRTL(DataType, latency = 0)
                          for _ in range(num_tile_inports)]
 
     # The `tile_out_or_link` would "or" the outports of the

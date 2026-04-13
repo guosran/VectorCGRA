@@ -52,7 +52,7 @@ from ...lib.basic.val_rdy.SourceRTL import SourceRTL as TestSrcRTL
 from ...lib.messages import *
 from ...lib.opt_type import *
 from ...lib.util.common import *
-from ...lib.trace_logger import init_trace_logger, close_trace_logger
+from ...lib.trace_logger import init_trace_logger, close_trace_logger, get_trace_logger
 
 #-------------------------------------------------------------------------
 # Test harness
@@ -181,8 +181,8 @@ num_fu_inports = 4
 num_fu_outports = 2
 num_routing_outports = num_tile_outports + num_fu_inports
 ctrl_mem_size = 6
-data_mem_size_global = 128
-data_mem_size_per_bank = 16
+data_mem_size_global = 16384
+data_mem_size_per_bank = 2048
 num_banks_per_cgra = 2
 num_cgra_columns = 4
 num_cgra_rows = 1
@@ -265,16 +265,16 @@ def to_uint32(val):
 #
 # Expected: out = sum(A[i][j] * B[i][j]) = 1+2+3+4+5+6 = 21
 
-NI = 2
-NJ = 3
+NI = 60
+NJ = 70
 total = NI * NJ  # 6
 base_A = 0
 base_B = NJ * NI  # 6
 
 # A values (row-major): 1, 2, 3, 4, 5, 6
-A_values = [1, 2, 3, 4, 5, 6]
+A_values = [1] * total
 # B values (row-major): all ones
-B_values = [1, 1, 1, 1, 1, 1]
+B_values = [1] * total
 
 expected_result = sum(a * b for a, b in zip(A_values, B_values))  # 21
 
@@ -307,7 +307,7 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
                     10
 
   from ...validation.script_generator import ScriptFactory
-  script_factory = ScriptFactory(path = "validation/test/conv/conv_small.yaml",
+  script_factory = ScriptFactory(path = "validation/test/conv/conv.yaml",
                                     CtrlType = CtrlType,
                                     IntraCgraPktType = IntraCgraPktType,
                                     CgraPayloadType = CgraPayloadType,
@@ -330,12 +330,7 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
                                     RegIdxType = RegIdxType,
                                     CtrlAddrType = CtrlAddrType,
                                     DataAddrType = DataAddrType,
-                                    num_registers_per_reg_bank = num_registers_per_reg_bank,
-                                    arg_map = {
-                                        "arg6": base_A,   # base address of array A
-                                        "arg7": base_B,   # base address of array B
-                                    },
-                                    gep_stride = NJ)  # stride for 2D GEP = NJ
+                                    num_registers_per_reg_bank = num_registers_per_reg_bank)
 
   src_opt_pkt0_ = script_factory.makeVectorCGRAPkts()
 
@@ -394,8 +389,8 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
   trace_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'trace_output')
   trace_file = os.path.join(trace_dir, 'trace_conv4x4_4x4_Mesh.jsonl')
   init_trace_logger(trace_file, x_tiles, y_tiles, "Mesh", cgra_id)
-
-  MAX_CYCLES = 600
+  logger = get_trace_logger()
+  MAX_CYCLES = 800
   active_tiles = {
     2: th.dut.tile[2], 3: th.dut.tile[3],
     5: th.dut.tile[5], 6: th.dut.tile[6],
@@ -410,6 +405,8 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
 
   for cycle in range(MAX_CYCLES):
     th.sim_tick()
+    if logger:
+      logger.log_cycle(th.dut)
 
     # Collect state for all active tiles
     cur_state = {}
@@ -522,3 +519,6 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
 
 def test_homogeneous_4x4_conv_combinational_mem_access(cmdline_opts):
   sim_conv(cmdline_opts, mem_access_is_combinational = True)
+
+if __name__ == "__main__":
+    test_homogeneous_4x4_conv_combinational_mem_access({})

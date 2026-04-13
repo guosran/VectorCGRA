@@ -141,6 +141,8 @@ body { font-family: 'Consolas', 'Monaco', monospace; background: #1a1a2e; color:
   <button onclick="stepCycle(-1)">&lt;</button>
   <button onclick="stepCycle(1)">&gt;</button>
   <button onclick="goCycle(totalCycles-1)">&gt;|</button>
+  <input type="number" id="cycle-goto" min="0" max="0" value="0" style="width:70px;padding:4px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0;border-radius:3px;font-family:inherit;" onkeydown="if(event.key==='Enter')goCycle(+this.value)">
+  <button onclick="goCycle(+document.getElementById('cycle-goto').value)">Go</button>
   <input type="range" id="cycle-slider" min="0" max="0" value="0" oninput="goCycle(+this.value)">
   <span id="cycle-info">Cycle: 0 / 0</span>
   <span id="meta-info"></span>
@@ -168,9 +170,11 @@ const CMD_NAMES = {
   20: 'GR_ADD_R', 21: 'GR_MUL_R', 22: 'PRESERVE', 23: 'CLEAR',
 };
 
-let traceData = null;
+let traceData = null;   // sparse cache: cycle index -> data
+let traceFilename = null;
 let currentCycle = 0;
 let totalCycles = 0;
+let isLazyMode = false;
 
 // Load trace file list
 async function loadTraceList() {
@@ -189,19 +193,44 @@ async function loadTraceList() {
 }
 
 async function loadTrace(filename) {
-  document.getElementById('loading').textContent = 'Loading...';
+  document.getElementById('loading').textContent = 'Loading metadata...';
   try {
-    const resp = await fetch(`/api/trace/${encodeURIComponent(filename)}`);
-    const data = await resp.json();
-    traceData = data.cycles;
-    totalCycles = data.totalCycles;
+    // First get metadata
+    const metaResp = await fetch(`/api/trace/${encodeURIComponent(filename)}/meta`);
+    const meta = await metaResp.json();
+    traceFilename = filename;
+    totalCycles = meta.totalCycles;
+    traceData = {};
+    isLazyMode = true;
     currentCycle = 0;
     document.getElementById('cycle-slider').max = totalCycles - 1;
     document.getElementById('cycle-nav').style.display = 'flex';
-    renderCycle();
+    // Load first cycle
+    await fetchAndRenderCycle(0);
   } catch(e) {
     document.getElementById('loading').textContent = 'Error loading trace: ' + e.message;
   }
+}
+
+async function fetchCycleRange(start, end) {
+  const resp = await fetch(`/api/trace/${encodeURIComponent(traceFilename)}/range?start=${start}&end=${end}`);
+  const data = await resp.json();
+  data.cycles.forEach((c, idx) => { traceData[start + idx] = c; });
+  return data.cycles;
+}
+
+async function fetchAndRenderCycle(c) {
+  c = Math.max(0, Math.min(totalCycles - 1, c));
+  currentCycle = c;
+  document.getElementById('cycle-slider').value = c;
+  if (!traceData[c]) {
+    document.getElementById('loading').textContent = `Loading cycle ${c}...`;
+    // Pre-fetch a small window around the current cycle
+    const start = Math.max(0, c - 2);
+    const end = Math.min(totalCycles, c + 10);
+    await fetchCycleRange(start, end);
+  }
+  renderCycle();
 }
 
 async function loadCustomPath() {
@@ -215,7 +244,10 @@ async function loadCustomPath() {
     });
     const data = await resp.json();
     if (data.error) { document.getElementById('loading').textContent = data.error; return; }
-    traceData = data.cycles;
+    traceData = {};
+    data.cycles.forEach((c, idx) => { traceData[idx] = c; });
+    traceFilename = null;
+    isLazyMode = false;
     totalCycles = data.totalCycles;
     currentCycle = 0;
     document.getElementById('cycle-slider').max = totalCycles - 1;
@@ -228,9 +260,13 @@ async function loadCustomPath() {
 
 function stepCycle(delta) { goCycle(currentCycle + delta); }
 function goCycle(c) {
-  currentCycle = Math.max(0, Math.min(totalCycles - 1, c));
-  document.getElementById('cycle-slider').value = currentCycle;
-  renderCycle();
+  if (isLazyMode) {
+    fetchAndRenderCycle(c);
+  } else {
+    currentCycle = Math.max(0, Math.min(totalCycles - 1, c));
+    document.getElementById('cycle-slider').value = currentCycle;
+    renderCycle();
+  }
 }
 
 // Keyboard navigation
@@ -249,7 +285,10 @@ function renderCycle() {
   const H = data.height;
 
   document.getElementById('cycle-info').textContent = `Cycle: ${data.cycle} / ${totalCycles - 1}`;
+  document.getElementById('cycle-goto').value = currentCycle;
+  document.getElementById('cycle-goto').max = totalCycles - 1;
   document.getElementById('meta-info').textContent = `CGRA #${data.cgra_id} | ${W}x${H} ${data.topology} | ${W*H} tiles`;
+  document.getElementById('loading').textContent = '';
 
   // Raw JSON panel
   document.getElementById('raw-json').textContent = JSON.stringify(data, null, 2);

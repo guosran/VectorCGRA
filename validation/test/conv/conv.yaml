@@ -187,7 +187,7 @@ array_config:
                   time_step: 5
                   invalid_iterations: 1
                   src_operands:
-                    - operand: "arg7"
+                    - operand: "#4200"
                       color: "RED"
                     - operand: "$0"
                       color: "RED"
@@ -213,7 +213,7 @@ array_config:
                   time_step: 6
                   invalid_iterations: 1
                   src_operands:
-                    - operand: "arg6"
+                    - operand: "#0"
                       color: "RED"
                     - operand: "$0"
                       color: "RED"

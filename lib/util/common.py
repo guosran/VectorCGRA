@@ -41,7 +41,7 @@ LINK_FROM_MEM = 1
 LINK_TO_MEM   = 2
 
 # Constant for maximum control-message count.
-MAX_CTRL_COUNT = 1024
+MAX_CTRL_COUNT = 65536
 
 # Constant for prologue max count.
 PROLOGUE_MAX_COUNT = 7

@@ -34,7 +34,8 @@ class CgraRTL(Component):
                 FunctionUnit, FuList, cgra_topology,
                 controller2addr_map, idTo2d_map,
                 is_multi_cgra = True,
-                has_ctrl_ring = True):
+                has_ctrl_ring = True,
+                per_tile_data_mem_size = 0):
 
     # Derives all types from CgraPayloadType.
     DataType = CgraPayloadType.get_field_type(kAttrData)
@@ -114,7 +115,8 @@ class CgraRTL(Component):
                                       multi_cgra_columns,
                                       s.num_tiles,
                                       mem_access_is_combinational,
-                                      idTo2d_map)
+                                      idTo2d_map,
+                                      per_tile_data_mem_size)
     s.controller = ControllerRTL(NocPktType,
                                   multi_cgra_rows, multi_cgra_columns,
                                   s.num_tiles, controller2addr_map, idTo2d_map)
