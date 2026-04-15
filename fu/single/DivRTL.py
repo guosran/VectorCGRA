@@ -62,7 +62,10 @@ class DivRTL(Fu):
 
       if s.recv_opt.val:
         if s.recv_opt.msg.operation == OPT_DIV:
-          s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload // s.recv_in[s.in1_idx].msg.payload
+          if s.recv_in[s.in1_idx].msg.payload != 0:
+            s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload // s.recv_in[s.in1_idx].msg.payload
+          else:
+            s.send_out[0].msg.payload @= 0
           s.send_out[0].msg.predicate @= s.recv_in[s.in0_idx].msg.predicate & \
                                          s.recv_in[s.in1_idx].msg.predicate & \
                                          s.reached_vector_factor
@@ -73,7 +76,10 @@ class DivRTL(Fu):
           s.recv_opt.rdy @= s.recv_all_val & s.send_out[0].rdy
 
         elif s.recv_opt.msg.operation == OPT_DIV_CONST:
-          s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload // s.recv_const.msg.payload
+          if s.recv_const.msg.payload != 0:
+            s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload // s.recv_const.msg.payload
+          else:
+            s.send_out[0].msg.payload @= 0
           s.send_out[0].msg.predicate @= s.recv_in[s.in0_idx].msg.predicate & \
                                          s.reached_vector_factor
           s.recv_all_val @= s.recv_in[s.in0_idx].val & s.recv_const.val
