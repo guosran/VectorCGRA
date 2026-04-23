@@ -116,10 +116,6 @@ class FlexibleFuRTL(Component):
 
         # opt connection.
         s.fu[i].recv_opt.msg @= s.recv_opt.msg
-        # Sets each FU's op code as NAH when prologue execution is not completed.
-        # As they are supposed to do nothing during that prologue cycles.
-        if s.prologue_count_inport != 0:
-          s.fu[i].recv_opt.msg.operation @= OPT_NAH
         s.fu[i].recv_opt.val @= s.recv_opt.val
         s.fu_recv_opt_rdy_vector[i] @= s.fu[i].recv_opt.rdy
 
@@ -156,4 +152,3 @@ class FlexibleFuRTL(Component):
     out_str = " | ".join([(str(x.msg) + ", val: " + str(x.val) + ", rdy: " + str(x.rdy)) for x in s.send_out])
     recv_str = " | ".join([str(x.msg) for x in s.recv_in])
     return f'[recv: {recv_str}] {opt_str} (const: {s.recv_const.msg}, val: {s.recv_const.val}, rdy: {s.recv_const.rdy}) ] = [out: {out_str}] (recv_opt.rdy: {s.recv_opt.rdy}, recv_in[0].rdy: {s.recv_in[0].rdy}, recv_in[1].rdy: {s.recv_in[1].rdy}, {OPT_SYMBOL_DICT[s.recv_opt.msg.operation]}, recv_opt.val: {s.recv_opt.val}, send[0].val: {s.send_out[0].val}) '
-

@@ -23,7 +23,8 @@ Author : Shiran Guo
 import os
 
 from pymtl3.datatypes import b1, b2
-from pymtl3.passes.backends.verilog import (VerilogVerilatorImportPass)
+from pymtl3.passes.backends.verilog import (VerilogPlaceholderPass,
+                                            VerilogVerilatorImportPass)
 from pymtl3.stdlib.test_utils import (run_sim,
                                       config_model_with_cmdline_opts)
 
@@ -33,7 +34,7 @@ from ...fu.flexible.FlexibleFuRTL import FlexibleFuRTL
 from ...fu.float.FpAddRTL import FpAddRTL
 from ...fu.float.FpMulRTL import FpMulRTL
 from ...fu.single.AdderRTL import AdderRTL
-from ...fu.single.DivRTL import DivRTL
+from ...fu.single.ExclusiveDivRTL import ExclusiveDivRTL
 from ...fu.single.GepRTL import GepRTL
 from ...fu.single.GrantRTL import GrantRTL
 from ...fu.single.CompRTL import CompRTL
@@ -160,7 +161,7 @@ class TestHarness(Component):
 # Common configurations/setups.
 FuList = [AdderRTL,
           MulRTL,
-          DivRTL,
+          ExclusiveDivRTL,
           GepRTL,
           LogicRTL,
           ShifterRTL,
@@ -296,6 +297,8 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
   src_ctrl_pkt = []
   complete_signal_sink_out = []
   src_query_pkt = []
+  repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+  conv_yaml = os.path.join(repo_root, "validation", "test", "conv", "conv.yaml")
 
   # kernel specific parameters (matching conv_small.yaml constants).
   kLoopLowerBound = 0         # GRANT_ONCE #0
@@ -307,7 +310,7 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
                     10
 
   from ...validation.script_generator import ScriptFactory
-  script_factory = ScriptFactory(path = "validation/test/conv/conv.yaml",
+  script_factory = ScriptFactory(path = conv_yaml,
                                     CtrlType = CtrlType,
                                     IntraCgraPktType = IntraCgraPktType,
                                     CgraPayloadType = CgraPayloadType,
@@ -383,6 +386,7 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
   # inspect internal signals for debugging.
   from pymtl3 import DefaultPassGroup
   th.elaborate()
+  th.apply(VerilogPlaceholderPass())
   dump_vcd = (cmdline_opts or {}).get("dump_vcd", False)
   if dump_vcd:
     th.apply(DefaultPassGroup(vcdwave=dump_vcd, linetrace=False))

@@ -11,7 +11,6 @@ Author : Jiajun Qin
 from pymtl3 import *
 from ..basic.Fu import Fu
 from ...lib.opt_type import *
-from pymtl3.passes.backends.verilog import *
 
 class ExclusiveDivRTL(Fu):
 
@@ -109,7 +108,7 @@ class ExclusiveDivRTL(Fu):
       else:
         s.do_div @= 0
 
-class Div( VerilogPlaceholder, Component ):
+class Div( Component ):
 
   # Constructor
   def construct( s, WIDTH = 32, CYCLE = 8 ):
@@ -121,17 +120,11 @@ class Div( VerilogPlaceholder, Component ):
     s.quotient            = OutPort ( WIDTH )
     s.remainder            = OutPort ( WIDTH )
 
-    # Configurations
-    from os import path
-    srcdir = path.dirname(__file__) + path.sep
-
-    s.set_metadata( VerilogPlaceholderPass.src_file, srcdir + 'division.v' )
-    s.set_metadata( VerilogPlaceholderPass.top_module, 'pipeline_division' )
-    s.set_metadata( VerilogPlaceholderPass.v_include, [ srcdir ] )
-    # s.set_metadata( VerilogPlaceholderPass.v_libs, [
-    #   srcdir + 'division.v',
-    # ])
-    s.set_metadata( VerilogPlaceholderPass.has_clk, True )
-    s.set_metadata( VerilogPlaceholderPass.has_reset, True )
-
-    s.set_metadata( VerilogVerilatorImportPass.vl_Wno_list, ['WIDTH'] )
+    @update
+    def comb_div():
+      if s.divisor == 0:
+        s.quotient @= 0
+        s.remainder @= 0
+      else:
+        s.quotient @= s.dividend // s.divisor
+        s.remainder @= s.dividend % s.divisor

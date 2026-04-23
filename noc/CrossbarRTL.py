@@ -156,6 +156,13 @@ class CrossbarRTL(Component):
 
         s.recv_opt.rdy @= s.all_send_accepted & \
                           reduce_and(s.recv_valid_or_prologue_allowing_vector)
+      else:
+        # Unconfigured / idle tiles must not backpressure the fabric.
+        # If traffic reaches a crossbar with no active route, treat it
+        # as a sink so stray messages can drain instead of deadlocking
+        # upstream producers.
+        for i in range(num_inports):
+          s.recv_data[i].rdy @= 1
 
     @update_ff
     def update_prologue_counter():
@@ -310,4 +317,3 @@ class CrossbarRTL(Component):
     recv_str = "|".join([str(x.msg) for x in s.recv_data])
     out_str  = "|".join([str(x.msg) for x in s.send_data])
     return f"{recv_str} [{s.recv_opt.msg}] {out_str}"
-
