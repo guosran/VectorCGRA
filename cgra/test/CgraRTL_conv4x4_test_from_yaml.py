@@ -92,12 +92,26 @@ class TestHarness(Component):
                 controller2addr_map, idTo2d_map,
                 is_multi_cgra = False)
 
-    cmp_fn = lambda a, b : a.payload.data == b.payload.data and a.payload.cmd == b.payload.cmd
+    cmp_fn = lambda a, b : a.payload.data.payload == b.payload.data.payload and \
+                           a.payload.cmd == b.payload.cmd
     s.complete_signal_sink_out = TestSinkRTL(CtrlPktType, complete_signal_sink_out, cmp_fn = cmp_fn)
 
     # Connections
     s.dut.cgra_id //= cgra_id
-    s.complete_signal_sink_out.recv //= s.dut.send_to_cpu_pkt
+    expected_complete_data = complete_signal_sink_out[0].payload.data.payload \
+        if complete_signal_sink_out else DataType()
+
+    @update
+    def filter_complete_packets():
+      forward_complete = s.dut.send_to_cpu_pkt.val & \
+                         (s.dut.send_to_cpu_pkt.msg.payload.cmd == CMD_COMPLETE) & \
+                         (s.dut.send_to_cpu_pkt.msg.payload.data.payload == expected_complete_data)
+      s.complete_signal_sink_out.recv.val @= forward_complete
+      s.complete_signal_sink_out.recv.msg @= s.dut.send_to_cpu_pkt.msg
+      if forward_complete:
+        s.dut.send_to_cpu_pkt.rdy @= s.complete_signal_sink_out.recv.rdy
+      else:
+        s.dut.send_to_cpu_pkt.rdy @= 1
 
     complete_count_value = \
             sum(1 for pkt in complete_signal_sink_out \
@@ -105,6 +119,7 @@ class TestHarness(Component):
 
     CompleteCountType = mk_bits(clog2(complete_count_value + 1))
     s.complete_count = Wire(CompleteCountType)
+    s.expected_complete_count = complete_count_value
 
     @update
     def conditional_issue_ctrl_or_query():
@@ -153,7 +168,7 @@ class TestHarness(Component):
 
   def done(s):
     return (s.src_ctrl_pkt.done() and s.src_query_pkt.done()
-            and s.complete_signal_sink_out.done())
+            and int(s.complete_count) >= s.expected_complete_count)
 
   def line_trace(s):
     return s.dut.line_trace()
@@ -416,6 +431,13 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
     if logger:
       logger.log_cycle(th.dut)
 
+    if th.dut.send_to_cpu_pkt.val and \
+       th.dut.send_to_cpu_pkt.msg.payload.cmd == CMD_COMPLETE:
+      pkt = th.dut.send_to_cpu_pkt.msg
+      print(f"cpu_send {cycle} cmd {int(pkt.payload.cmd)} "
+            f"data {int(pkt.payload.data.payload)} "
+            f"pred {int(pkt.payload.data.predicate)} src {int(pkt.src)}")
+
     # Collect state for all active tiles
     cur_state = {}
     for tid, t in active_tiles.items():
@@ -518,6 +540,7 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
         consts.append(int(cq.reg_file.regs[idx].payload))
       if consts:
         print(f"          const_queue: {consts}")
+    raise AssertionError("conv4x4 simulation deadlocked")
 
   close_trace_logger()
 

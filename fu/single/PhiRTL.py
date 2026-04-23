@@ -142,8 +142,13 @@ class PhiRTL(Fu):
       if s.reset | s.clear:
         for i in range (2 ** s.CtrlAddrType.nbits):
           s.first[i] <<= b1(1)
-      if ((s.recv_opt.msg.operation == OPT_PHI_CONST) | (s.recv_opt.msg.operation == OPT_PHI_START)) & s.reached_vector_factor:
+      elif s.recv_opt.val & s.recv_opt.rdy & \
+           ((s.recv_opt.msg.operation == OPT_PHI_CONST) | \
+            (s.recv_opt.msg.operation == OPT_PHI_START)):
         s.first[s.ctrl_addr_inport] <<= b1(0)
+      else:
+        for i in range (2 ** s.CtrlAddrType.nbits):
+          s.first[i] <<= s.first[i]
 
   def line_trace(s):
     opt_str = " #"
@@ -153,4 +158,3 @@ class PhiRTL(Fu):
     recv_str = ",".join([str(x.msg) for x in s.recv_in])
     first_str = ",".join([str(x) for x in s.first])
     return f'[recv: {recv_str}] {opt_str} (const_reg: {s.recv_const.msg}) (first: {first_str})] = [out: {out_str}] (s.recv_opt.rdy: {s.recv_opt.rdy}, {OPT_SYMBOL_DICT[s.recv_opt.msg.operation]}, send[0].val: {s.send_out[0].val}) reached_vector_factor: {s.reached_vector_factor}; vector_factor_counter: {s.vector_factor_counter}; ctrl_addr_inport: {s.ctrl_addr_inport}'
-

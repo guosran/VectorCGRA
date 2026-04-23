@@ -255,8 +255,7 @@ class CrossbarRTL(Component):
         # (i.e., i >= num_inports) go to the FU's inports. In other words, we skip
         # the rdy checking on the FU's inports (connecting from crossbar_outport) if
         # the compute is already completed.
-        if (s.in_dir[i] > 0) & \
-           (~s.compute_done | (i < outport_towards_local_base_id)):
+        if s.in_dir[i] > 0:
           # When prologue is active for this output's input, don't
           # require the downstream channel to be ready -- we won't be
           # sending any data through it during prologue anyway.
@@ -269,7 +268,8 @@ class CrossbarRTL(Component):
     def update_valid_vector():
       s.recv_valid_vector @= 0
       for i in range(num_outports):
-        if s.in_dir[i] > 0:
+        if (s.in_dir[i] > 0) & \
+           (~s.compute_done | (i < outport_towards_local_base_id)):
           # When prologue is active for this output's input, treat the
           # input as not-valid even if data is physically present in the
           # channel.  This prevents the crossbar from asserting

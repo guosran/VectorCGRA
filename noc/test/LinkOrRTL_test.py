@@ -33,6 +33,7 @@ class TestHarness(Component):
     s.src0.send //= s.dut.recv_fu
     s.src1.send //= s.dut.recv_xbar
     s.dut.send //= s.sink.recv
+    s.dut.fu_xbar_rdy //= 1
 
   def done(s):
     return s.src0.done() and s.src1.done() and s.sink.done()
@@ -82,4 +83,3 @@ sink_msgs = [DataType(7,1), DataType(4,1), DataType(3,1), DataType(2,1), DataTyp
 def test_simple():
   th = TestHarness(DataType, test_msgs_0, test_msgs_1, sink_msgs)
   run_sim(th)
-

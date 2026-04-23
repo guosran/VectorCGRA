@@ -183,13 +183,6 @@ class CtrlMemDynamicRTL(Component):
                                s.recv_from_element_queue.send.msg)
           s.send_pkt_to_controller.val @= 1
           s.recv_from_element_queue.send.rdy @= s.send_pkt_to_controller.rdy
-        elif ((s.total_ctrl_steps_val > 0) & (s.times == s.total_ctrl_steps_val)) | \
-           (s.reg_file.rdata[0].operation == OPT_START):
-          # Sends COMPLETE signal to Controller when the last ctrl signal is done.
-          if ~s.sent_complete & (s.total_ctrl_steps_val > 0) & (s.times == s.total_ctrl_steps_val) & s.start_iterate_ctrl:
-            s.send_pkt_to_controller.msg @= \
-                IntraCgraPktType(s.tile_id, num_tiles, 0, 0, 0, 0, 0, 0, 0, 0, CgraPayloadType(CMD_COMPLETE, 0, 0, 0, 0))
-            s.send_pkt_to_controller.val @= 1
 
     @update
     def update_send_ctrl():
