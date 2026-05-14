@@ -1,12 +1,12 @@
 """
 ==========================================================================
-CgraRTL_gemv_test_from_yaml.py
+CgraRTL_sad_test_from_yaml.py
 ==========================================================================
 Test cases for CGRA with crossbar-based data memory and ring-based control
-memory of each tile, using gemv.yaml compiled kernel.
+memory of each tile, using sad.yaml compiled kernel.
 
 Author : Bohan Cui
-  Date : April 5, 2026
+  Date : Apr 6, 2026
 """
 
 import os
@@ -22,7 +22,6 @@ from ...fu.flexible.FlexibleFuRTL import FlexibleFuRTL
 from ...fu.float.FpAddRTL import FpAddRTL
 from ...fu.float.FpMulRTL import FpMulRTL
 from ...fu.single.AdderRTL import AdderRTL
-from ...fu.single.DivRTL import DivRTL
 from ...fu.single.GrantRTL import GrantRTL
 from ...fu.single.CompRTL import CompRTL
 from ...fu.single.LogicRTL import LogicRTL
@@ -148,7 +147,6 @@ class TestHarness(Component):
 # Common configurations/setups.
 FuList = [AdderRTL,
           MulRTL,
-          DivRTL,
           LogicRTL,
           ShifterRTL,
           PhiRTL,
@@ -167,9 +165,9 @@ num_tile_outports = tile_ports
 num_fu_inports = 4
 num_fu_outports = 2
 num_routing_outports = num_tile_outports + num_fu_inports
-ctrl_mem_size = 11
-data_mem_size_global = 256
-data_mem_size_per_bank = 32
+ctrl_mem_size = 6
+data_mem_size_global = 128
+data_mem_size_per_bank = 16
 num_banks_per_cgra = 2
 num_cgra_columns = 4
 num_cgra_rows = 1
@@ -243,62 +241,73 @@ read_reg_idx_code = [RegIdxType(0) for _ in range(num_fu_inports)]
 
 fu_in_code = [FuInType(x + 1) for x in range(num_fu_inports)]
 
-# GEMV kernel (from compiled gemv.yaml):
+# SAD kernel (from compiled sad.yaml):
 #
-# Kernel semantics (4x4 matrix-vector multiply y = A * x):
-#   Outer loop: i = 0..3     (GRANT_ONCE #0, ICMP_EQ #4, ADD #1)
-#     Inner loop: j = 0..3   (GRANT_ONCE #0, ICMP_EQ #4, ADD #1)
-#       A_addr = i << 2 + j   (SHL #2, GEP)        -- stride-4 row layout
-#       x_addr = 16 + j       (GEP #16)
-#       acc += A[A_addr] * x[x_addr]  (LOAD, LOAD, MUL, ADD)
-#     y_addr = 20 + i         (GEP #20)
-#     y[y_addr] = acc          (STORE)
-#   RETURN_VOID               (signals completion)
+# Kernel semantics:
+#   i = 0               (GRANT_ONCE #0)
+#   sum = 0             (GRANT_ONCE #0)
+#   while (i != 8):     (ICMP_EQ #8)
+#     a = A[0 + i]      (GEP #0, LOAD)  -- array A at base address 0
+#     b = B[8 + i]      (GEP #8, LOAD)  -- array B at base address 8
+#     diff = b - a      (SUB)
+#     abs_diff = |diff|  (ICMP_SLT, SUB, SEL)
+#     sum += abs_diff    (ADD)
+#     i += 1             (ADD #1)
+#   return sum           (RETURN_VALUE)
 #
-# Memory layout (word-addressed, shared memory; disjoint regions):
-#   A[0][0..3]  at addresses  0..3
-#   A[1][0..3]  at addresses  4..7
-#   A[2][0..3]  at addresses  8..11
-#   A[3][0..3]  at addresses 12..15
-#   x[0..3]     at addresses 16..19
-#   y[0..3]     at addresses 20..23
-#
-#   RETURN_VOID sends CMD_COMPLETE with data = 0.
+# Preload data:
+#   Array A (addr 0-7):  [1, 2, 3, 4, 5, 6, 7, 8]
+#   Array B (addr 8-15): [4, 5, 6, 7, 8, 9, 10, 11]
+#   diff = B[i] - A[i] = 3 for all i (always non-negative)
+#   SAD = sum of |diff| = 8 * 3 = 24
 
-# Preload matrix A (row-major, stride 4) and vector x with non-trivial values.
-#   A[i][j] = i * 4 + j + 1       -> values 1..16 at addresses 0..15
-#   x[j]    = j + 1               -> values 1, 2, 3, 4 at addresses 16..19
-# Expected results (written by kernel into y at 20..23):
-#   y[0] = 1*1 + 2*2 + 3*3 + 4*4    =  30
-#   y[1] = 5*1 + 6*2 + 7*3 + 8*4    =  70
-#   y[2] = 9*1 + 10*2 + 11*3 + 12*4 = 110
-#   y[3] = 13*1 + 14*2 + 15*3 + 16*4 = 150
-A_values = [i * 4 + j + 1 for i in range(4) for j in range(4)]
-x_values = [j + 1 for j in range(4)]
+# Preload array A at addresses 0-7 and array B at addresses 8-15.
 preload_data = [
     [
-        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(A_values[i], 1), data_addr = i))
-        for i in range(16)
-    ] + [
-        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(x_values[j], 1), data_addr = 16 + j))
-        for j in range(4)
+        # Array A: values 1..8 at addresses 0..7
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(1, 1), data_addr = 0)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(2, 1), data_addr = 1)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(3, 1), data_addr = 2)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(4, 1), data_addr = 3)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(5, 1), data_addr = 4)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(6, 1), data_addr = 5)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(7, 1), data_addr = 6)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(8, 1), data_addr = 7)),
+        # Array B: values 4..11 at addresses 8..15
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(4, 1), data_addr = 8)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(5, 1), data_addr = 9)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(6, 1), data_addr = 10)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(7, 1), data_addr = 11)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(8, 1), data_addr = 12)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(9, 1), data_addr = 13)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(10, 1), data_addr = 14)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(11, 1), data_addr = 15)),
     ]
 ]
 
 
-def sim_gemv(cmdline_opts, mem_access_is_combinational):
+def sim_sad_return(cmdline_opts, mem_access_is_combinational):
   src_ctrl_pkt = []
   complete_signal_sink_out = []
   src_query_pkt = []
 
-  # Kernel specific parameters (matching gemv.yaml constants).
-  # Nested loop: outer i=0..3, inner j=0..3, total 16 inner iterations.
-  kCtrlCountPerIter = 11      # compiled_ii: 11
-  kTotalIterations = 4 * 4    # outer_bound * inner_bound
-  kTotalCtrlSteps = kCtrlCountPerIter * kTotalIterations + 20
+  # kernel specific parameters (matching sad.yaml constants).
+  kInputBaseAddress = 0       # GEP #0 (array A)
+  kRefBaseAddress = 8         # GEP #8 (array B)
+  kSumInitValue = 0           # GRANT_ONCE #0
+  kLoopLowerBound = 0         # GRANT_ONCE #0
+  kLoopIncrement = 1          # ADD #1
+  kLoopUpperBound = 8         # ICMP_EQ #8
+  kCtrlCountPerIter = 5       # compiled_ii: 5
+  kTotalCtrlSteps = kCtrlCountPerIter * \
+                    (kLoopUpperBound - kLoopLowerBound) + \
+                    20
+  # SAD = sum of |B[i] - A[i]| for i in [0, 8)
+  # With A = [1..8] and B = [4..11], each diff = 3, so SAD = 24
+  kExpectedOutput = 24
 
   from ...validation.script_generator import ScriptFactory
-  script_factory = ScriptFactory(path = "validation/test/gemv/gemv.yaml",
+  script_factory = ScriptFactory(path = "validation/test/sad/sad.yaml",
                                     CtrlType = CtrlType,
                                     IntraCgraPktType = IntraCgraPktType,
                                     CgraPayloadType = CgraPayloadType,
@@ -325,7 +334,7 @@ def sim_gemv(cmdline_opts, mem_access_is_combinational):
 
   src_opt_pkt0_ = script_factory.makeVectorCGRAPkts()
 
-  # Order the packets according to the x (first) and y (second) coordinates.
+  # order the packets according to the x (first) and y (second) coordinates
   src_opt_pkt0 = []
   for x, y in src_opt_pkt0_:
     src_opt_pkt0.append(src_opt_pkt0_[(x, y)])
@@ -334,17 +343,14 @@ def sim_gemv(cmdline_opts, mem_access_is_combinational):
       [
       ]
 
-  # RETURN_VOID is at core 8 (col 0, row 2), so src = 8.
-  # RETURN_VOID sends CMD_COMPLETE with data = 0.
+  # RETURN_VALUE is at core 5 (col 1, row 1), so src = 5.
   expected_complete_sink_out_pkg = \
       [
-          IntraCgraPktType(src = 8, dst = 16, payload = CgraPayloadType(CMD_COMPLETE, DataType(0, 0, 0, 0))) for _ in range(1)
+          IntraCgraPktType(src = 5, dst = 16, payload = CgraPayloadType(CMD_COMPLETE, DataType(kExpectedOutput, 1, 0, 0))) for _ in range(1)
       ]
   expected_mem_sink_out_pkt = \
       [
       ]
-
-  print("src_opt_pkt0: ", src_opt_pkt0)
 
   for activation in preload_data:
       src_ctrl_pkt.extend(activation)
@@ -374,7 +380,7 @@ def sim_gemv(cmdline_opts, mem_access_is_combinational):
   th = config_model_with_cmdline_opts(th, cmdline_opts, duts = ['dut'])
 
   trace_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'trace_output')
-  trace_file = os.path.join(trace_dir, 'trace_gemv_4x4_Mesh.jsonl')
+  trace_file = os.path.join(trace_dir, 'trace_sad_4x4_Mesh.jsonl')
   init_trace_logger(trace_file, x_tiles, y_tiles, "Mesh", cgra_id)
 
   run_sim(th)
@@ -385,5 +391,5 @@ def sim_gemv(cmdline_opts, mem_access_is_combinational):
   print("\n\n\ncycles: ", cycles)
 
 
-def test_homogeneous_4x4_gemv_combinational_mem_access(cmdline_opts):
-  sim_gemv(cmdline_opts, mem_access_is_combinational = True)
+def test_homogeneous_4x4_sad_combinational_mem_access_return(cmdline_opts):
+  sim_sad_return(cmdline_opts, mem_access_is_combinational = True)

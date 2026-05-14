@@ -101,16 +101,16 @@ yaml_to_VectorCGRA_map = {
     "LOOP_CONTROL": None, #?
     "PHI_CONST": OPT_PHI_CONST, 
     "PHI_START": OPT_PHI_START,
-    
     "GEP": OPT_ADD, # By now, we just support 2 op GEP and it is equivalent to ADD (base + index)
-    
+    "GEP_2D": OPT_GEP_2D, # special GEP for 2D array access, with 3 operands (base, idx1, idx2) and idx1/idx2 are multiplied with different stride.
+
     "RETURN": OPT_RET,
     "RETURN_VALUE": OPT_RET,
     "RETURN_VOID": OPT_RET_VOID,
     "LDD": OPT_LD,
     "LOAD": OPT_LD,
     "STORE": OPT_STR,
-    
+
     "NE": OPT_NE,
     "MUL_ADD": OPT_MUL_ADD,
     "DATA_MOV": OPT_PAS
@@ -128,6 +128,7 @@ yaml_to_VectorCGRA_map_const = {
     # REM with immediate uses the same opcode as register REM in current RTL.
     "REM": OPT_REM,
     "GEP": OPT_ADD_CONST, # By now, we just support 2 op GEP and it is equivalent to ADD (base + index)
+    "GEP_2D": OPT_GEP_2D_CONST,
     "ICMP_EQ": OPT_EQ_CONST,
     "ICMP_SGE": OPT_GTE_CONST,
     "ICMP_SGT": OPT_GT_CONST,
@@ -337,7 +338,8 @@ class InstructionSignals:
                 # find all the const
                 for index, src_operand in enumerate(src_operands):
                     if _type(src_operand) == 'IMM':
-                        const_operands.append(src_operand)
+                        # include the real timestep for future sorting
+                        const_operands.append((src_operand, operation["time_step"]))
                         # delete it from the src_operands since it is implicit in vectorCGRA
                         del src_operands[index]
 
@@ -802,10 +804,14 @@ class TileSignals:
                 consts.extend(const)
         
         # make the const signals
+        # sort the consts according to the usage order
+        consts.sort(key=lambda x: x[1])
+        #print("\n\n\n\n\n\n\n\n\n\n\n\n\n")
+        #print(consts)
         for idx, const_operand in enumerate(consts):
             const_pkt = self.IntraCgraPktType(0, self.id_, 
                                               payload = self.CgraPayloadType(self.CMD_CONST_,
-                                                                             data = self.DataType(int(const_operand['operand'][1:] if const_operand['operand'].startswith('#') else const_operand['operand']), 1)))
+                                                                             data = self.DataType(int(const_operand[0]['operand'][1:] if const_operand[0]['operand'].startswith('#') else const_operand[0]['operand']), 1)))
             all_signals.append(const_pkt)
             
         # make the pre-configuration
@@ -976,7 +982,7 @@ if __name__ == "__main__":
     print("Test the Basic Functionality of the ScriptFactory")
 
     script_factory = ScriptFactory(
-        path = "./validation/test/sad/sad.yaml",
+        path = "./validation/test/gemm/gemm.yaml",
         CtrlType = CtrlTypeDummy,
         IntraCgraPktType = IntraCgraPktTypeDummy,
         CgraPayloadType = CgraPayloadTypeDummy,
@@ -984,7 +990,7 @@ if __name__ == "__main__":
         FuOutType = FuOutTypeDummy,
         CMD_CONFIG_input = CMD_CONFIG_Dummy(),
         FuInType = FuInTypeDummy,
-        ii = 5,
+        ii = 17,
         loop_times = 2,
         CMD_CONST_input = CMD_CONST_Dummy(),
         CMD_CONFIG_COUNT_PER_ITER_input = CMD_CONFIG_COUNT_PER_ITER_Dummy(),
@@ -1007,4 +1013,3 @@ if __name__ == "__main__":
         for pkt in pkts[(x, y)]:
             print(pkt)
             print("--------------------------------")
-    

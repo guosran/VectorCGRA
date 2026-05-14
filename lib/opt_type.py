@@ -133,6 +133,7 @@ OPT_SYMBOL_DICT = {
   OPT_ADD_CONST                  : "(+')",
   OPT_INC                        : "(++)",
   OPT_SUB                        : "(-)",
+  OPT_SUB_CONST                  : "(-')",
   OPT_LLS                        : "(<<)",
   OPT_LRS                        : "(>>)",
   OPT_MUL                        : "(*)",
