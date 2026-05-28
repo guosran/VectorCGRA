@@ -1,12 +1,12 @@
 """
 ==========================================================================
-CgraRTL_histogram_test_from_yaml.py
+CgraRTL_gemv_test_from_yaml.py
 ==========================================================================
 Test cases for CGRA with crossbar-based data memory and ring-based control
-memory of each tile, using histogram.yaml compiled kernel.
+memory of each tile, using gemv.yaml compiled kernel.
 
 Author : Bohan Cui
-  Date : April 4, 2026
+  Date : April 5, 2026
 """
 
 import os
@@ -167,9 +167,9 @@ num_tile_outports = tile_ports
 num_fu_inports = 4
 num_fu_outports = 2
 num_routing_outports = num_tile_outports + num_fu_inports
-ctrl_mem_size = 6
-data_mem_size_global = 128
-data_mem_size_per_bank = 16
+ctrl_mem_size = 11
+data_mem_size_global = 256
+data_mem_size_per_bank = 32
 num_banks_per_cgra = 2
 num_cgra_columns = 4
 num_cgra_rows = 1
@@ -243,64 +243,62 @@ read_reg_idx_code = [RegIdxType(0) for _ in range(num_fu_inports)]
 
 fu_in_code = [FuInType(x + 1) for x in range(num_fu_inports)]
 
-# Histogram kernel (from compiled histogram.yaml):
+# GEMV kernel (from compiled gemv.yaml):
 #
-# Kernel semantics (constants baked into histogram.yaml):
-#   i = 0              (GRANT_ONCE #0)
-#   while (i != 20):   (ICMP_EQ #20)
-#     addr = 0 + i              (GEP, base 0)
-#     val = data[addr]           (LOAD)
-#     bin = val * 5              (MUL #5)
-#     bin = bin + (-5)           (ADD #-5)
-#     bin = bin / 18             (DIV #18)
-#     bin = sext(bin)            (SEXT -> PAS)
-#     hist_addr = 20 + bin       (GEP #20)
-#     hist[hist_addr] += 1       (LOAD, ADD #1, STORE)
-#     i += 1                    (ADD #1)
-#   RETURN_VOID                 (signals completion)
+# Kernel semantics (4x4 matrix-vector multiply y = A * x):
+#   Outer loop: i = 0..3     (GRANT_ONCE #0, ICMP_EQ #4, ADD #1)
+#     Inner loop: j = 0..3   (GRANT_ONCE #0, ICMP_EQ #4, ADD #1)
+#       A_addr = i << 2 + j   (SHL #2, GEP)        -- stride-4 row layout
+#       x_addr = 16 + j       (GEP #16)
+#       acc += A[A_addr] * x[x_addr]  (LOAD, LOAD, MUL, ADD)
+#     y_addr = 20 + i         (GEP #20)
+#     y[y_addr] = acc          (STORE)
+#   RETURN_VOID               (signals completion)
 #
-# bin = (val * 5 - 5) / 18  (integer division)
-#   val=1  -> bin=0 (addr 20)    val=5  -> bin=1 (addr 21)
-#   val=9  -> bin=2 (addr 22)    val=13 -> bin=3 (addr 23)
+# Memory layout (word-addressed, shared memory; disjoint regions):
+#   A[0][0..3]  at addresses  0..3
+#   A[1][0..3]  at addresses  4..7
+#   A[2][0..3]  at addresses  8..11
+#   A[3][0..3]  at addresses 12..15
+#   x[0..3]     at addresses 16..19
+#   y[0..3]     at addresses 20..23
 #
-# Input: 5 x val=1, 5 x val=5, 5 x val=9, 5 x val=13
-# Expected: data_mem[20]=5, data_mem[21]=5, data_mem[22]=5, data_mem[23]=5
 #   RETURN_VOID sends CMD_COMPLETE with data = 0.
 
-# Preload 20 data values at addresses 0~19, spread across 4 bins.
-preload_data_values = [1, 1, 1, 1, 1,
-                       5, 5, 5, 5, 5,
-                       9, 9, 9, 9, 9,
-                       13, 13, 13, 13, 13]
+# Preload matrix A (row-major, stride 4) and vector x with non-trivial values.
+#   A[i][j] = i * 4 + j + 1       -> values 1..16 at addresses 0..15
+#   x[j]    = j + 1               -> values 1, 2, 3, 4 at addresses 16..19
+# Expected results (written by kernel into y at 20..23):
+#   y[0] = 1*1 + 2*2 + 3*3 + 4*4    =  30
+#   y[1] = 5*1 + 6*2 + 7*3 + 8*4    =  70
+#   y[2] = 9*1 + 10*2 + 11*3 + 12*4 = 110
+#   y[3] = 13*1 + 14*2 + 15*3 + 16*4 = 150
+A_values = [i * 4 + j + 1 for i in range(4) for j in range(4)]
+x_values = [j + 1 for j in range(4)]
 preload_data = [
     [
-        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(preload_data_values[i], 1), data_addr = i))
-        for i in range(20)
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(A_values[i], 1), data_addr = i))
+        for i in range(16)
     ] + [
-        # Initialize histogram bins (addr 20~23) to 0 with predicate=1,
-        # so that the first LOAD in the read-modify-write sees valid data.
-        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(0, 1), data_addr = i))
-        for i in range(20, 24)
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(x_values[j], 1), data_addr = 16 + j))
+        for j in range(4)
     ]
 ]
 
 
-def sim_histogram(cmdline_opts, mem_access_is_combinational):
+def sim_gemv(cmdline_opts, mem_access_is_combinational):
   src_ctrl_pkt = []
   complete_signal_sink_out = []
   src_query_pkt = []
 
-  # kernel specific parameters (matching histogram.yaml constants).
-  kLoopLowerBound = 0         # GRANT_ONCE #0
-  kLoopIncrement = 1          # ADD #1
-  kLoopUpperBound = 20        # ICMP_EQ #20
-  kCtrlCountPerIter = 6       # compiled_ii: 6
-  kTotalCtrlSteps = kCtrlCountPerIter * \
-                    (kLoopUpperBound - kLoopLowerBound) + \
-                    10
+  # Kernel specific parameters (matching gemv.yaml constants).
+  # Nested loop: outer i=0..3, inner j=0..3, total 16 inner iterations.
+  kCtrlCountPerIter = 11      # compiled_ii: 11
+  kTotalIterations = 4 * 4    # outer_bound * inner_bound
+  kTotalCtrlSteps = kCtrlCountPerIter * kTotalIterations + 20
 
   from ...validation.script_generator import ScriptFactory
-  script_factory = ScriptFactory(path = "validation/test/histogram.yaml",
+  script_factory = ScriptFactory(path = "validation/test/gemv/gemv.yaml",
                                     CtrlType = CtrlType,
                                     IntraCgraPktType = IntraCgraPktType,
                                     CgraPayloadType = CgraPayloadType,
@@ -327,7 +325,7 @@ def sim_histogram(cmdline_opts, mem_access_is_combinational):
 
   src_opt_pkt0_ = script_factory.makeVectorCGRAPkts()
 
-  # order the packets according to the x (first) and y (second) coordinates
+  # Order the packets according to the x (first) and y (second) coordinates.
   src_opt_pkt0 = []
   for x, y in src_opt_pkt0_:
     src_opt_pkt0.append(src_opt_pkt0_[(x, y)])
@@ -336,11 +334,11 @@ def sim_histogram(cmdline_opts, mem_access_is_combinational):
       [
       ]
 
-  # RETURN_VOID is at core 9 (col 1, row 2), so src = 9.
+  # RETURN_VOID is at core 8 (col 0, row 2), so src = 8.
   # RETURN_VOID sends CMD_COMPLETE with data = 0.
   expected_complete_sink_out_pkg = \
       [
-          IntraCgraPktType(src = 9, dst = 16, payload = CgraPayloadType(CMD_COMPLETE, DataType(0, 0, 0, 0))) for _ in range(1)
+          IntraCgraPktType(src = 8, dst = 16, payload = CgraPayloadType(CMD_COMPLETE, DataType(0, 0, 0, 0))) for _ in range(1)
       ]
   expected_mem_sink_out_pkt = \
       [
@@ -376,7 +374,7 @@ def sim_histogram(cmdline_opts, mem_access_is_combinational):
   th = config_model_with_cmdline_opts(th, cmdline_opts, duts = ['dut'])
 
   trace_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'trace_output')
-  trace_file = os.path.join(trace_dir, 'trace_histogram_4x4_Mesh.jsonl')
+  trace_file = os.path.join(trace_dir, 'trace_gemv_4x4_Mesh.jsonl')
   init_trace_logger(trace_file, x_tiles, y_tiles, "Mesh", cgra_id)
 
   run_sim(th)
@@ -387,5 +385,5 @@ def sim_histogram(cmdline_opts, mem_access_is_combinational):
   print("\n\n\ncycles: ", cycles)
 
 
-def test_homogeneous_4x4_histogram_combinational_mem_access(cmdline_opts):
-  sim_histogram(cmdline_opts, mem_access_is_combinational = True)
+def test_homogeneous_4x4_gemv_combinational_mem_access(cmdline_opts):
+  sim_gemv(cmdline_opts, mem_access_is_combinational = True)

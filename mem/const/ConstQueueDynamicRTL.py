@@ -34,6 +34,12 @@ class ConstQueueDynamicRTL(Component):
     # write cursor and read cursor
     s.wr_cur = Wire(WrCurType)
     s.rd_cur = Wire(AddrType)
+    # Latch for a consumption whose val/rdy handshake already completed but
+    # whose ctrl_proceed has not yet pulsed. Without this, the queue advance
+    # is lost when the reader asserts rdy one cycle but ctrl_proceed only
+    # fires later (e.g., at an iteration boundary where some sub-module of
+    # the tile delays ctrl_mem.send_ctrl.rdy).
+    s.consume_pending = Wire(1)
 
     # Interface
     s.send_const = SendIfcRTL(DataType)
@@ -94,17 +100,26 @@ class ConstQueueDynamicRTL(Component):
     def update_rd_cur():
       if s.reset | s.clear:
         s.rd_cur <<= 0
+        s.consume_pending <<= 0
       else:
-        # Checks whether the "reader" successfully read the data at rd_cur,
-        # and proceed rd_cur accordingly.
-        # Use (send_const.rdy | const_consumed_early) to handle the case where
-        # the FU consumed the const in an earlier cycle (before routing/fu crossbar
-        # completed), so send_const.rdy is no longer asserted when ctrl_proceed fires.
-        if (s.send_const.rdy | s.const_consumed_early) & s.ctrl_proceed:
-          if zext((s.rd_cur), WrCurType) < (s.wr_cur - 1):
+        # A consumption is "owed" whenever the reader raises rdy, or one
+        # was already pending from an earlier cycle. It retires on the next
+        # ctrl_proceed pulse. (Matches the original advance condition when
+        # rdy and ctrl_proceed happen in the same cycle, but also covers the
+        # case where rdy was asserted one cycle and ctrl_proceed only pulses
+        # later; previously that handshake was silently lost.
+        handshake_now = s.send_const.rdy | s.const_consumed_early
+        consume_retire = (s.consume_pending | handshake_now) & s.ctrl_proceed
+        if consume_retire:
+          if zext(s.rd_cur, WrCurType) < (s.wr_cur - 1):
             s.rd_cur <<= s.rd_cur + 1
           else:
             s.rd_cur <<= 0
+          s.consume_pending <<= 0
+        else:
+          # Remember an in-flight handshake whose ctrl_proceed has not yet
+          # pulsed, so a later ctrl_proceed still advances the queue.
+          s.consume_pending <<= s.consume_pending | handshake_now
 
 
   def line_trace(s, verbosity = 0):
@@ -129,4 +144,3 @@ class ConstQueueDynamicRTL(Component):
     res_md = markdown_table(reg_list).set_params(quote = False).get_markdown()
     return (f"wr_cur: {s.wr_cur}, rd_cur: {s.rd_cur}, send_const.val: {s.send_const.val}, send_const.rdy: {s.send_const.rdy}, send_const.msg: {s.send_const.msg}, ctrl_proceed: {s.ctrl_proceed}"
             f"{res_md}")
-

@@ -23,6 +23,7 @@ class LinkOrRTL(Component):
     # Interface
     s.recv_fu = RecvIfcRTL(DataType)
     s.recv_xbar = RecvIfcRTL(DataType)
+    s.fu_xbar_rdy = InPort(b1)
     s.send = SendIfcRTL(DataType)
 
     @update
@@ -40,10 +41,12 @@ class LinkOrRTL(Component):
       # s.send.msg.bypass @= 0
       # s.send.msg.delay @= s.recv_fu.msg.delay | s.recv_xbar.msg.delay
 
-      s.send.val @= s.recv_fu.val | s.recv_xbar.val
+      # Only let FU traffic win once the FU crossbar has actually committed
+      # the multicast/send for this cycle; otherwise the link can expose
+      # transient FU output and create cross-tile bubbles.
+      s.send.val @= (s.recv_fu.val & s.fu_xbar_rdy) | s.recv_xbar.val
       s.recv_fu.rdy @= s.send.rdy
       s.recv_xbar.rdy @= s.send.rdy
 
   def line_trace(s):
     return f"from_fu:{s.recv_fu.msg} or from_xbar:{s.recv_xbar.msg} => out:{s.send.msg} ## "
-

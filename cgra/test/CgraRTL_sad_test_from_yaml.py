@@ -1,12 +1,12 @@
 """
 ==========================================================================
-CgraRTL_histogram_test_from_yaml.py
+CgraRTL_sad_test_from_yaml.py
 ==========================================================================
 Test cases for CGRA with crossbar-based data memory and ring-based control
-memory of each tile, using histogram.yaml compiled kernel.
+memory of each tile, using sad.yaml compiled kernel.
 
 Author : Bohan Cui
-  Date : April 4, 2026
+  Date : Apr 6, 2026
 """
 
 import os
@@ -22,7 +22,6 @@ from ...fu.flexible.FlexibleFuRTL import FlexibleFuRTL
 from ...fu.float.FpAddRTL import FpAddRTL
 from ...fu.float.FpMulRTL import FpMulRTL
 from ...fu.single.AdderRTL import AdderRTL
-from ...fu.single.DivRTL import DivRTL
 from ...fu.single.GrantRTL import GrantRTL
 from ...fu.single.CompRTL import CompRTL
 from ...fu.single.LogicRTL import LogicRTL
@@ -148,7 +147,6 @@ class TestHarness(Component):
 # Common configurations/setups.
 FuList = [AdderRTL,
           MulRTL,
-          DivRTL,
           LogicRTL,
           ShifterRTL,
           PhiRTL,
@@ -243,64 +241,73 @@ read_reg_idx_code = [RegIdxType(0) for _ in range(num_fu_inports)]
 
 fu_in_code = [FuInType(x + 1) for x in range(num_fu_inports)]
 
-# Histogram kernel (from compiled histogram.yaml):
+# SAD kernel (from compiled sad.yaml):
 #
-# Kernel semantics (constants baked into histogram.yaml):
-#   i = 0              (GRANT_ONCE #0)
-#   while (i != 20):   (ICMP_EQ #20)
-#     addr = 0 + i              (GEP, base 0)
-#     val = data[addr]           (LOAD)
-#     bin = val * 5              (MUL #5)
-#     bin = bin + (-5)           (ADD #-5)
-#     bin = bin / 18             (DIV #18)
-#     bin = sext(bin)            (SEXT -> PAS)
-#     hist_addr = 20 + bin       (GEP #20)
-#     hist[hist_addr] += 1       (LOAD, ADD #1, STORE)
-#     i += 1                    (ADD #1)
-#   RETURN_VOID                 (signals completion)
+# Kernel semantics:
+#   i = 0               (GRANT_ONCE #0)
+#   sum = 0             (GRANT_ONCE #0)
+#   while (i != 8):     (ICMP_EQ #8)
+#     a = A[0 + i]      (GEP #0, LOAD)  -- array A at base address 0
+#     b = B[8 + i]      (GEP #8, LOAD)  -- array B at base address 8
+#     diff = b - a      (SUB)
+#     abs_diff = |diff|  (ICMP_SLT, SUB, SEL)
+#     sum += abs_diff    (ADD)
+#     i += 1             (ADD #1)
+#   return sum           (RETURN_VALUE)
 #
-# bin = (val * 5 - 5) / 18  (integer division)
-#   val=1  -> bin=0 (addr 20)    val=5  -> bin=1 (addr 21)
-#   val=9  -> bin=2 (addr 22)    val=13 -> bin=3 (addr 23)
-#
-# Input: 5 x val=1, 5 x val=5, 5 x val=9, 5 x val=13
-# Expected: data_mem[20]=5, data_mem[21]=5, data_mem[22]=5, data_mem[23]=5
-#   RETURN_VOID sends CMD_COMPLETE with data = 0.
+# Preload data:
+#   Array A (addr 0-7):  [1, 2, 3, 4, 5, 6, 7, 8]
+#   Array B (addr 8-15): [4, 5, 6, 7, 8, 9, 10, 11]
+#   diff = B[i] - A[i] = 3 for all i (always non-negative)
+#   SAD = sum of |diff| = 8 * 3 = 24
 
-# Preload 20 data values at addresses 0~19, spread across 4 bins.
-preload_data_values = [1, 1, 1, 1, 1,
-                       5, 5, 5, 5, 5,
-                       9, 9, 9, 9, 9,
-                       13, 13, 13, 13, 13]
+# Preload array A at addresses 0-7 and array B at addresses 8-15.
 preload_data = [
     [
-        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(preload_data_values[i], 1), data_addr = i))
-        for i in range(20)
-    ] + [
-        # Initialize histogram bins (addr 20~23) to 0 with predicate=1,
-        # so that the first LOAD in the read-modify-write sees valid data.
-        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(0, 1), data_addr = i))
-        for i in range(20, 24)
+        # Array A: values 1..8 at addresses 0..7
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(1, 1), data_addr = 0)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(2, 1), data_addr = 1)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(3, 1), data_addr = 2)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(4, 1), data_addr = 3)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(5, 1), data_addr = 4)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(6, 1), data_addr = 5)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(7, 1), data_addr = 6)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(8, 1), data_addr = 7)),
+        # Array B: values 4..11 at addresses 8..15
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(4, 1), data_addr = 8)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(5, 1), data_addr = 9)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(6, 1), data_addr = 10)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(7, 1), data_addr = 11)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(8, 1), data_addr = 12)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(9, 1), data_addr = 13)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(10, 1), data_addr = 14)),
+        IntraCgraPktType(0, 0, payload = CgraPayloadType(CMD_STORE_REQUEST, data = DataType(11, 1), data_addr = 15)),
     ]
 ]
 
 
-def sim_histogram(cmdline_opts, mem_access_is_combinational):
+def sim_sad_return(cmdline_opts, mem_access_is_combinational):
   src_ctrl_pkt = []
   complete_signal_sink_out = []
   src_query_pkt = []
 
-  # kernel specific parameters (matching histogram.yaml constants).
+  # kernel specific parameters (matching sad.yaml constants).
+  kInputBaseAddress = 0       # GEP #0 (array A)
+  kRefBaseAddress = 8         # GEP #8 (array B)
+  kSumInitValue = 0           # GRANT_ONCE #0
   kLoopLowerBound = 0         # GRANT_ONCE #0
   kLoopIncrement = 1          # ADD #1
-  kLoopUpperBound = 20        # ICMP_EQ #20
-  kCtrlCountPerIter = 6       # compiled_ii: 6
+  kLoopUpperBound = 8         # ICMP_EQ #8
+  kCtrlCountPerIter = 5       # compiled_ii: 5
   kTotalCtrlSteps = kCtrlCountPerIter * \
                     (kLoopUpperBound - kLoopLowerBound) + \
-                    10
+                    20
+  # SAD = sum of |B[i] - A[i]| for i in [0, 8)
+  # With A = [1..8] and B = [4..11], each diff = 3, so SAD = 24
+  kExpectedOutput = 24
 
   from ...validation.script_generator import ScriptFactory
-  script_factory = ScriptFactory(path = "validation/test/histogram.yaml",
+  script_factory = ScriptFactory(path = "validation/test/sad/sad.yaml",
                                     CtrlType = CtrlType,
                                     IntraCgraPktType = IntraCgraPktType,
                                     CgraPayloadType = CgraPayloadType,
@@ -336,17 +343,14 @@ def sim_histogram(cmdline_opts, mem_access_is_combinational):
       [
       ]
 
-  # RETURN_VOID is at core 9 (col 1, row 2), so src = 9.
-  # RETURN_VOID sends CMD_COMPLETE with data = 0.
+  # RETURN_VALUE is at core 5 (col 1, row 1), so src = 5.
   expected_complete_sink_out_pkg = \
       [
-          IntraCgraPktType(src = 9, dst = 16, payload = CgraPayloadType(CMD_COMPLETE, DataType(0, 0, 0, 0))) for _ in range(1)
+          IntraCgraPktType(src = 5, dst = 16, payload = CgraPayloadType(CMD_COMPLETE, DataType(kExpectedOutput, 1, 0, 0))) for _ in range(1)
       ]
   expected_mem_sink_out_pkt = \
       [
       ]
-
-  print("src_opt_pkt0: ", src_opt_pkt0)
 
   for activation in preload_data:
       src_ctrl_pkt.extend(activation)
@@ -376,7 +380,7 @@ def sim_histogram(cmdline_opts, mem_access_is_combinational):
   th = config_model_with_cmdline_opts(th, cmdline_opts, duts = ['dut'])
 
   trace_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'trace_output')
-  trace_file = os.path.join(trace_dir, 'trace_histogram_4x4_Mesh.jsonl')
+  trace_file = os.path.join(trace_dir, 'trace_sad_4x4_Mesh.jsonl')
   init_trace_logger(trace_file, x_tiles, y_tiles, "Mesh", cgra_id)
 
   run_sim(th)
@@ -387,5 +391,5 @@ def sim_histogram(cmdline_opts, mem_access_is_combinational):
   print("\n\n\ncycles: ", cycles)
 
 
-def test_homogeneous_4x4_histogram_combinational_mem_access(cmdline_opts):
-  sim_histogram(cmdline_opts, mem_access_is_combinational = True)
+def test_homogeneous_4x4_sad_combinational_mem_access_return(cmdline_opts):
+  sim_sad_return(cmdline_opts, mem_access_is_combinational = True)

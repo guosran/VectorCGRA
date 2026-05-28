@@ -127,6 +127,8 @@ class TileWithContextSwitchRTL(Component):
     s.element_done = Wire(1)
     s.fu_crossbar_done = Wire(1)
     s.routing_crossbar_done = Wire(1)
+    s.routing_crossbar_idle_drain = Wire(1)
+    s.fu_crossbar_idle_drain = Wire(1)
 
     # Used for:
     # Clearing the 'first' signal in PhiRTL to correctly resume the progress.
@@ -144,6 +146,8 @@ class TileWithContextSwitchRTL(Component):
     s.fu_crossbar.tile_id //= s.tile_id
     s.routing_crossbar.cgra_id //= s.cgra_id
     s.routing_crossbar.tile_id //= s.tile_id
+    s.routing_crossbar.drain_when_inactive //= s.routing_crossbar_idle_drain
+    s.fu_crossbar.drain_when_inactive //= s.fu_crossbar_idle_drain
 
     # Assigns crossbar id.
     s.routing_crossbar.crossbar_id //= PORT_INDEX_ROUTING_CROSSBAR
@@ -364,6 +368,8 @@ class TileWithContextSwitchRTL(Component):
     def notify_crossbars_compute_status():
       s.routing_crossbar.compute_done @= s.element_done
       s.fu_crossbar.compute_done @= s.element_done
+      s.routing_crossbar_idle_drain @= ~s.routing_crossbar_done
+      s.fu_crossbar_idle_drain @= ~s.fu_crossbar_done
 
   # Line trace
   def line_trace(s):

@@ -116,10 +116,37 @@ class FlexibleFuRTL(Component):
       # a const from the const queue. This is needed so that during prologue,
       # we can still advance the const queue rd_cur to keep it in sync with
       # the ctrl pointer.
-      s.op_uses_const @= b1(0)
-      for const_op in OPT_USES_CONST_LIST:
-        if s.recv_opt.msg.operation == const_op:
-          s.op_uses_const @= b1(1)
+      s.op_uses_const @= \
+          (s.recv_opt.msg.operation == OPT_CONST) | \
+          (s.recv_opt.msg.operation == OPT_ADD_CONST) | \
+          (s.recv_opt.msg.operation == OPT_SUB_CONST) | \
+          (s.recv_opt.msg.operation == OPT_DIV_CONST) | \
+          (s.recv_opt.msg.operation == OPT_EQ_CONST) | \
+          (s.recv_opt.msg.operation == OPT_NE_CONST) | \
+          (s.recv_opt.msg.operation == OPT_PHI_CONST) | \
+          (s.recv_opt.msg.operation == OPT_LD_CONST) | \
+          (s.recv_opt.msg.operation == OPT_STR_CONST) | \
+          (s.recv_opt.msg.operation == OPT_MUL_CONST) | \
+          (s.recv_opt.msg.operation == OPT_MUL_CONST_ADD) | \
+          (s.recv_opt.msg.operation == OPT_ADD_CONST_LD) | \
+          (s.recv_opt.msg.operation == OPT_INC_NE_CONST_NOT_GRT) | \
+          (s.recv_opt.msg.operation == OPT_FADD_CONST) | \
+          (s.recv_opt.msg.operation == OPT_FMUL_CONST) | \
+          (s.recv_opt.msg.operation == OPT_VEC_ADD_CONST) | \
+          (s.recv_opt.msg.operation == OPT_VEC_SUB_CONST) | \
+          (s.recv_opt.msg.operation == OPT_VEC_ADD_CONST_COMBINED) | \
+          (s.recv_opt.msg.operation == OPT_VEC_SUB_CONST_COMBINED) | \
+          (s.recv_opt.msg.operation == OPT_GTE_CONST) | \
+          (s.recv_opt.msg.operation == OPT_GRT_ONCE_CONST) | \
+          (s.recv_opt.msg.operation == OPT_LT_CONST) | \
+          (s.recv_opt.msg.operation == OPT_GT_CONST) | \
+          (s.recv_opt.msg.operation == OPT_AND_CONST) | \
+          (s.recv_opt.msg.operation == OPT_OR_CONST) | \
+          (s.recv_opt.msg.operation == OPT_LLS_CONST) | \
+          (s.recv_opt.msg.operation == OPT_REM_CONST) | \
+          (s.recv_opt.msg.operation == OPT_GEP_CONST) | \
+          (s.recv_opt.msg.operation == OPT_GEP_2D_CONST) | \
+          (s.recv_opt.msg.operation == OPT_STR_DATA_CONST)
 
       for i in range(s.fu_list_size):
         # const connection.
@@ -177,4 +204,3 @@ class FlexibleFuRTL(Component):
     out_str = " | ".join([(str(x.msg) + ", val: " + str(x.val) + ", rdy: " + str(x.rdy)) for x in s.send_out])
     recv_str = " | ".join([str(x.msg) for x in s.recv_in])
     return f'[recv: {recv_str}] {opt_str} (const: {s.recv_const.msg}, val: {s.recv_const.val}, rdy: {s.recv_const.rdy}) ] = [out: {out_str}] (recv_opt.rdy: {s.recv_opt.rdy}, recv_in[0].rdy: {s.recv_in[0].rdy}, recv_in[1].rdy: {s.recv_in[1].rdy}, {OPT_SYMBOL_DICT[s.recv_opt.msg.operation]}, recv_opt.val: {s.recv_opt.val}, send[0].val: {s.send_out[0].val}) '
-

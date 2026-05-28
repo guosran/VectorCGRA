@@ -40,7 +40,7 @@ class CtrlMemDynamicRTL(Component):
     CtrlAddrType = mk_bits(clog2(ctrl_mem_size))
     PCType = mk_bits(clog2(ctrl_count_per_iter + 1))
     UpperBoundType = mk_bits(clog2(ctrl_mem_size + 1))
-    TimeType = mk_bits(clog2(MAX_CTRL_COUNT + 1))
+    TimeType = mk_bits(clog2(max(MAX_CTRL_COUNT, total_ctrl_steps) + 1))
     PrologueCountType = mk_bits(clog2(PROLOGUE_MAX_COUNT + 1))
     num_routing_xbar_inports = num_tile_inports + num_fu_inports
     TileInPortType = mk_bits(clog2(num_routing_xbar_inports))
@@ -88,7 +88,6 @@ class CtrlMemDynamicRTL(Component):
         [[Wire(PrologueCountType) for _ in range(num_routing_xbar_inports)] for _ in range(ctrl_mem_size)]
 
     # Connections.
-    s.send_ctrl.msg //= s.reg_file.rdata[0]
     s.recv_pkt_from_controller //= s.recv_pkt_from_controller_queue.recv
     s.recv_from_element //= s.recv_from_element_queue.recv
 
@@ -135,6 +134,7 @@ class CtrlMemDynamicRTL(Component):
             (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_LOOP_LOWER) | \
             (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_LOOP_UPPER) | \
             (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_LOOP_STEP) | \
+            (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_GEP_STRIDE) | \
             (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_UPDATE_COUNTER_SHADOW_VALUE) | \
             (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_RESET_LEAF_COUNTER) | \
             (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_GEP_STRIDE)):
@@ -162,6 +162,7 @@ class CtrlMemDynamicRTL(Component):
          (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_LOOP_LOWER) | \
          (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_LOOP_UPPER) | \
          (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_LOOP_STEP) | \
+         (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_GEP_STRIDE) | \
          (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_UPDATE_COUNTER_SHADOW_VALUE) | \
          (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_RESET_LEAF_COUNTER) | \
          (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_CONFIG_GEP_STRIDE):
@@ -208,6 +209,25 @@ class CtrlMemDynamicRTL(Component):
       if s.recv_pkt_from_controller_queue.send.val & \
           (s.recv_pkt_from_controller_queue.send.msg.payload.cmd == CMD_TERMINATE):
         s.send_ctrl.val @= b1(0)
+
+      for i in range(num_fu_inports):
+        s.send_ctrl.msg.fu_in[i]            @= s.reg_file.rdata[0].fu_in[i]
+        s.send_ctrl.msg.write_reg_from[i]   @= s.reg_file.rdata[0].write_reg_from[i]
+        s.send_ctrl.msg.write_reg_idx[i]    @= s.reg_file.rdata[0].write_reg_idx[i]
+        s.send_ctrl.msg.read_reg_towards[i] @= s.reg_file.rdata[0].read_reg_towards[i]
+        s.send_ctrl.msg.read_reg_idx[i]     @= s.reg_file.rdata[0].read_reg_idx[i]
+      for i in range(num_routing_outports):
+        s.send_ctrl.msg.routing_xbar_outport[i] @= s.reg_file.rdata[0].routing_xbar_outport[i]
+        s.send_ctrl.msg.fu_xbar_outport[i]      @= s.reg_file.rdata[0].fu_xbar_outport[i]
+      s.send_ctrl.msg.vector_factor_power @= s.reg_file.rdata[0].vector_factor_power
+      s.send_ctrl.msg.is_last_ctrl        @= s.reg_file.rdata[0].is_last_ctrl
+      # Keep downstream datapath blocks inactive unless this cycle is
+      # actually issuing a control word. The message can otherwise hold a
+      # freshly configured word while send_ctrl.val is low.
+      if ~s.send_ctrl.val:
+        s.send_ctrl.msg.operation @= OPT_START
+      else:
+        s.send_ctrl.msg.operation @= s.reg_file.rdata[0].operation
 
     @update_ff
     def update_whether_we_can_iterate_ctrl():
@@ -327,4 +347,3 @@ class CtrlMemDynamicRTL(Component):
   def line_trace(s):
     config_mem_str  = "|".join([str(data) for data in s.reg_file.regs])
     return f'reg_file.raddr[0]: {s.reg_file.raddr[0]} || sent_complete: {s.sent_complete} || times: {s.times} || total_ctrl_steps_val: {s.total_ctrl_steps_val} || start_iterate_ctrl: {s.start_iterate_ctrl}|| recv_pkt: {s.recv_pkt_from_controller.msg}.recv_rdy:{s.recv_pkt_from_controller.rdy} || control signal content: [{config_mem_str}] || ctrl_out: {s.send_ctrl.msg}, send_ctrl.val: {s.send_ctrl.val}, send_ctrl.rdy: {s.send_ctrl.rdy}, send_pkt.msg.payload.cmd: {s.send_pkt_to_controller.msg.payload.cmd}, send_pkt.val: {s.send_pkt_to_controller.val}, ctrl_count_per_iter_val: {s.ctrl_count_per_iter_val}, ctrl_count_lower_bound: {s.ctrl_count_lower_bound}'
-

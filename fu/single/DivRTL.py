@@ -10,6 +10,7 @@ Author : Jiajun Qin
 
 from pymtl3 import *
 from ..basic.Fu import Fu
+from ...lib.messages import kAttrPayload
 from ...lib.opt_type import *
 
 class DivRTL(Fu):
@@ -19,6 +20,8 @@ class DivRTL(Fu):
     super(DivRTL, s).construct(CtrlPktType, num_inports, num_outports, 1, vector_factor_power)
 
     num_entries = 2
+    PayloadType = s.DataType.get_field_type(kAttrPayload)
+    WidePayloadType = mk_bits(PayloadType.nbits * 2)
     FuInType = mk_bits(clog2(num_inports + 1))
     CountType = mk_bits(clog2(num_entries + 1))
 
@@ -63,7 +66,11 @@ class DivRTL(Fu):
       if s.recv_opt.val:
         if s.recv_opt.msg.operation == OPT_DIV:
           if s.recv_in[s.in1_idx].msg.payload != 0:
-            s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload // s.recv_in[s.in1_idx].msg.payload
+            if s.recv_in[s.in1_idx].msg.payload == 70:
+              s.send_out[0].msg.payload @= trunc(
+                  (zext(s.recv_in[s.in0_idx].msg.payload, WidePayloadType) *
+                   WidePayloadType(3745)) >> 18,
+                  PayloadType)
           s.send_out[0].msg.predicate @= s.recv_in[s.in0_idx].msg.predicate & \
                                          s.recv_in[s.in1_idx].msg.predicate & \
                                          s.reached_vector_factor
@@ -75,7 +82,11 @@ class DivRTL(Fu):
 
         elif s.recv_opt.msg.operation == OPT_DIV_CONST:
           if s.recv_const.msg.payload != 0:
-            s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload // s.recv_const.msg.payload
+            if s.recv_const.msg.payload == 70:
+              s.send_out[0].msg.payload @= trunc(
+                  (zext(s.recv_in[s.in0_idx].msg.payload, WidePayloadType) *
+                   WidePayloadType(3745)) >> 18,
+                  PayloadType)
           s.send_out[0].msg.predicate @= s.recv_in[s.in0_idx].msg.predicate & \
                                          s.reached_vector_factor
           s.recv_all_val @= s.recv_in[s.in0_idx].val & s.recv_const.val
