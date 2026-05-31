@@ -378,7 +378,7 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
   kTotalCtrlSteps += int(os.environ.get("CGRA_TOTAL_CTRL_STEPS_EXTRA", "0"))
 
   from ...validation.script_generator import ScriptFactory
-  script_factory = ScriptFactory(path = "/home/x/shiran/Zeonica_Testbench/kernel/conv/tmp-generated-instructions.yaml",
+  script_factory = ScriptFactory(path = "validation/test/conv/tmp-generated-instructions.yaml",
                                     CtrlType = CtrlType,
                                     IntraCgraPktType = IntraCgraPktType,
                                     CgraPayloadType = CgraPayloadType,
