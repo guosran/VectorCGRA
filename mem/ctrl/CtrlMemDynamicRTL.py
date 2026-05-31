@@ -187,13 +187,6 @@ class CtrlMemDynamicRTL(Component):
                                s.recv_from_element_queue.send.msg)
           s.send_pkt_to_controller.val @= 1
           s.recv_from_element_queue.send.rdy @= s.send_pkt_to_controller.rdy
-        elif ((s.total_ctrl_steps_val > 0) & (s.times == s.total_ctrl_steps_val)) | \
-           (s.reg_file.rdata[0].operation == OPT_START):
-          # Sends COMPLETE signal to Controller when the last ctrl signal is done.
-          if ~s.sent_complete & (s.total_ctrl_steps_val > 0) & (s.times == s.total_ctrl_steps_val) & s.start_iterate_ctrl:
-            s.send_pkt_to_controller.msg @= \
-                IntraCgraPktType(s.tile_id, num_tiles, 0, 0, 0, 0, 0, 0, 0, 0, CgraPayloadType(CMD_COMPLETE, 0, 0, 0, 0))
-            s.send_pkt_to_controller.val @= 1
 
     @update
     def update_send_ctrl():
@@ -222,10 +215,12 @@ class CtrlMemDynamicRTL(Component):
       s.send_ctrl.msg.vector_factor_power @= s.reg_file.rdata[0].vector_factor_power
       s.send_ctrl.msg.is_last_ctrl        @= s.reg_file.rdata[0].is_last_ctrl
       # Keep downstream datapath blocks inactive unless this cycle is
-      # actually issuing a control word. The message can otherwise hold a
-      # freshly configured word while send_ctrl.val is low.
+      # actually issuing a control word, and keep FUs idle during
+      # FU-crossbar prologue cycles.
       if ~s.send_ctrl.val:
         s.send_ctrl.msg.operation @= OPT_START
+      elif s.prologue_count_outport_fu != 0:
+        s.send_ctrl.msg.operation @= OPT_NAH
       else:
         s.send_ctrl.msg.operation @= s.reg_file.rdata[0].operation
 

@@ -187,7 +187,7 @@ array_config:
                   time_step: 5
                   invalid_iterations: 1
                   src_operands:
-                    - operand: "arg7"
+                    - operand: "#6"
                       color: "RED"
                     - operand: "$0"
                       color: "RED"
@@ -213,7 +213,7 @@ array_config:
                   time_step: 6
                   invalid_iterations: 1
                   src_operands:
-                    - operand: "arg6"
+                    - operand: "#0"
                       color: "RED"
                     - operand: "$0"
                       color: "RED"
@@ -231,7 +231,7 @@ array_config:
                   src_operands:
                     - operand: "NORTH"
                       color: "RED"
-                    - operand: "#70"
+                    - operand: "#3"
                       color: "RED"
                   dst_operands:
                     - operand: "$0"
@@ -383,7 +383,7 @@ array_config:
                   src_operands:
                     - operand: "$0"
                       color: "RED"
-                    - operand: "#4200"
+                    - operand: "#6"
                       color: "RED"
                   dst_operands:
                     - operand: "$0"
@@ -455,7 +455,7 @@ array_config:
                   src_operands:
                     - operand: "$0"
                       color: "RED"
-                    - operand: "#70"
+                    - operand: "#3"
                       color: "RED"
                   dst_operands:
                     - operand: "$0"
