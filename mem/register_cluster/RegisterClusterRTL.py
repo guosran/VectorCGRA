@@ -76,9 +76,23 @@ class RegisterClusterRTL(Component):
         # Checks if data should go towards routing_xbar (2 or 3)
         reg_towards_routing_xbar = (read_towards == kReadTowardsRoutingXbar) | (read_towards == kReadTowardsBoth)
 
+        # A terminal RET can write the arriving routing token into a register
+        # and read that same register in one control step. RegisterFile reads
+        # the old value in that cycle, so bypass only this exact case.
+        ret_last_routing_write_bypass = \
+            s.inport_opt.is_last_ctrl & \
+            (s.inport_opt.operation == OPT_RET) & \
+            reg_towards_fu & \
+            (s.inport_opt.write_reg_from[i] == PORT_ROUTING_CROSSBAR) & \
+            (s.inport_opt.write_reg_idx[i] == s.inport_opt.read_reg_idx[i]) & \
+            s.recv_data_from_routing_crossbar[i].val
+
         # Data from register bank has priority over routing crossbar data for FU path.
         # Note: reg_bank[i].send_data.val is set based on read_reg_towards in RegisterBankRTL.
-        if s.reg_bank[i].send_data.val & reg_towards_fu:
+        if ret_last_routing_write_bypass:
+          s.send_data_to_fu[i].msg @= \
+            s.recv_data_from_routing_crossbar[i].msg
+        elif s.reg_bank[i].send_data.val & reg_towards_fu:
           s.send_data_to_fu[i].msg @= \
             s.reg_bank[i].send_data.msg
         elif s.recv_data_from_routing_crossbar[i].val:
@@ -86,6 +100,7 @@ class RegisterClusterRTL(Component):
             s.recv_data_from_routing_crossbar[i].msg
 
         s.send_data_to_fu[i].val @= \
+            ret_last_routing_write_bypass | \
             s.recv_data_from_routing_crossbar[i].val | \
             (s.reg_bank[i].send_data.val & reg_towards_fu)
         s.reg_bank[i].send_data.rdy @= s.send_data_to_fu[i].rdy
