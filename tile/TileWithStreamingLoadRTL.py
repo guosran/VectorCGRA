@@ -121,6 +121,8 @@ class TileWithStreamingLoadRTL(Component):
     s.element_done = Wire(1)
     s.fu_crossbar_done = Wire(1)
     s.routing_crossbar_done = Wire(1)
+    s.routing_crossbar_idle_drain = Wire(1)
+    s.fu_crossbar_idle_drain = Wire(1)
 
     s.cgra_id = InPort(mk_bits(max(1, clog2(num_cgras))))
     s.tile_id = InPort(mk_bits(clog2(num_tiles + 1)))
@@ -133,6 +135,8 @@ class TileWithStreamingLoadRTL(Component):
     s.fu_crossbar.tile_id //= s.tile_id
     s.routing_crossbar.cgra_id //= s.cgra_id
     s.routing_crossbar.tile_id //= s.tile_id
+    s.routing_crossbar.drain_when_inactive //= s.routing_crossbar_idle_drain
+    s.fu_crossbar.drain_when_inactive //= s.fu_crossbar_idle_drain
 
     # Assigns crossbar id.
     s.routing_crossbar.crossbar_id //= PORT_INDEX_ROUTING_CROSSBAR
@@ -313,6 +317,10 @@ class TileWithStreamingLoadRTL(Component):
     def notify_crossbars_compute_status():
       s.routing_crossbar.compute_done @= s.element_done
       s.fu_crossbar.compute_done @= s.element_done
+      s.routing_crossbar_idle_drain @= \
+          ~s.routing_crossbar_done | ~s.ctrl_mem.send_ctrl.val
+      s.fu_crossbar_idle_drain @= \
+          ~s.fu_crossbar_done | ~s.ctrl_mem.send_ctrl.val
 
   # Line trace
   def line_trace(s):

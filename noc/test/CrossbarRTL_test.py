@@ -24,7 +24,7 @@ class TestHarness(Component):
 
   def construct(s, CrossbarUnit, DataType, CtrlType,
                 num_inports, num_outports, src_data, src_routing,
-                sink_out):
+                sink_out, drain_when_inactive = 0):
 
     num_tiles = 1
     ctrl_mem_size = 6
@@ -48,6 +48,8 @@ class TestHarness(Component):
       for addr in range(ctrl_mem_size):
         s.dut.prologue_count_inport[addr][i] //= 0
     s.src_opt.send //= s.dut.recv_opt
+    s.dut.compute_done //= 0
+    s.dut.drain_when_inactive //= drain_when_inactive
 
     # routing_xbar_outport in CtrlType may be wider than the crossbar's InType
     # (because mk_ctrl now uses clog2(num_tile_inports+num_fu_inports+1)).
@@ -144,3 +146,10 @@ def test_multi_cast():
                    num_routing_outports, src_data, src_opt, sink_out)
   run_sim(th)
 
+def test_inactive_drain_consumes_stale_input():
+  src_data = [[DataType(11, 1)], [], []]
+  sink_out = [[], [], []]
+  th = TestHarness(FU, DataType, CtrlType, num_tile_inports,
+                   num_routing_outports, src_data, [], sink_out,
+                   drain_when_inactive = 1)
+  run_sim(th)
