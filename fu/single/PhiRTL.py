@@ -89,15 +89,10 @@ class PhiRTL(Fu):
           if s.cur_first:
             s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload
             s.send_out[0].msg.predicate @= s.reached_vector_factor
-          elif s.recv_in[s.in0_idx].msg.predicate == Bits1(1):
-            s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload
-            s.send_out[0].msg.predicate @= s.reached_vector_factor
-          elif s.recv_in[s.in1_idx].msg.predicate == Bits1(1):
+          else:
             s.send_out[0].msg.payload @= s.recv_in[s.in1_idx].msg.payload
-            s.send_out[0].msg.predicate @= s.reached_vector_factor
-          else: # No predecessor is active.
-            s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload
-            s.send_out[0].msg.predicate @= 0
+            s.send_out[0].msg.predicate @= s.recv_in[s.in1_idx].msg.predicate & \
+                                           s.reached_vector_factor
           s.recv_all_val @= ((s.cur_first & s.recv_in[s.in0_idx].val) | \
                              (~s.cur_first & s.recv_in[s.in0_idx].val & s.recv_in[s.in1_idx].val))
           s.send_out[0].val @= s.recv_all_val

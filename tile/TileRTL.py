@@ -50,7 +50,9 @@ class TileRTL(Component):
     CtrlPktType = IntraCgraPktType
     DataType = CgraPayloadType.get_field_type(kAttrData)
     PredicateType = DataType.get_field_type(kAttrPredicate)
+    PayloadType = DataType.get_field_type(kAttrPayload)
     CtrlSignalType = CgraPayloadType.get_field_type(kAttrCtrl)
+    CmdType = CgraPayloadType.get_field_type(kAttrCmd)
     data_bitwidth = DataType.get_field_type(kAttrPayload).nbits
 
     # Constants.
@@ -62,6 +64,10 @@ class TileRTL(Component):
 
     CtrlAddrType = mk_bits(clog2(ctrl_mem_size))
     DataAddrType = mk_bits(clog2(data_mem_size))
+    DebugTimeType = mk_bits(clog2(max(MAX_CTRL_COUNT, total_steps) + 1))
+    DebugOpType = CtrlSignalType.get_field_type(kAttrOperation)
+    FuInType = mk_bits(clog2(num_fu_inports + 1))
+    PrologueCountType = mk_bits(clog2(PROLOGUE_MAX_COUNT + 1))
 
     # Interfaces.
     s.recv_data = [RecvIfcRTL(DataType)
@@ -73,6 +79,58 @@ class TileRTL(Component):
     s.recv_from_controller_pkt = RecvIfcRTL(CtrlPktType)
     # Sends the ctrl packets to ctrl ring.
     s.send_to_controller_pkt = SendIfcRTL(CtrlPktType)
+    s.debug_times = OutPort(DebugTimeType)
+    s.debug_ctrl_addr = OutPort(CtrlAddrType)
+    s.debug_start = OutPort(b1)
+    s.debug_send_ctrl_val = OutPort(b1)
+    s.debug_send_ctrl_rdy = OutPort(b1)
+    s.debug_op = OutPort(DebugOpType)
+    s.debug_prologue_count_fu = OutPort(PrologueCountType)
+    s.debug_to_ctrl_val = OutPort(b1)
+    s.debug_to_ctrl_cmd = OutPort(CmdType)
+    s.debug_to_ctrl_data = OutPort(PayloadType)
+    s.debug_to_ctrl_pred = OutPort(PredicateType)
+    s.debug_elem_recv_opt_val = OutPort(b1)
+    s.debug_elem_recv_opt_rdy = OutPort(b1)
+    s.debug_elem_recv_opt_op = OutPort(DebugOpType)
+    s.debug_elem_recv_opt_fu_in0 = OutPort(FuInType)
+    s.debug_elem_recv_opt_fu_in1 = OutPort(FuInType)
+    s.debug_elem_recv_opt_vfp = OutPort(mk_bits(3))
+    s.debug_elem_recv_opt_is_last = OutPort(b1)
+    s.debug_elem_selected_reached_vf = OutPort(b1)
+    s.debug_elem_selected_vf_counter = OutPort(mk_bits(8))
+    s.debug_elem_recv_in_val = [OutPort(b1) for _ in range(num_fu_inports)]
+    s.debug_elem_recv_in_rdy = [OutPort(b1) for _ in range(num_fu_inports)]
+    s.debug_elem_recv_in_data = [OutPort(PayloadType) for _ in range(num_fu_inports)]
+    s.debug_elem_recv_in_pred = [OutPort(PredicateType) for _ in range(num_fu_inports)]
+    s.debug_elem_send_out_val = [OutPort(b1) for _ in range(num_fu_outports)]
+    s.debug_elem_send_out_rdy = [OutPort(b1) for _ in range(num_fu_outports)]
+    s.debug_elem_send_out_data = [OutPort(PayloadType) for _ in range(num_fu_outports)]
+    s.debug_elem_send_out_pred = [OutPort(PredicateType) for _ in range(num_fu_outports)]
+    s.debug_elem_send_ctrl_val = OutPort(b1)
+    s.debug_elem_send_ctrl_rdy = OutPort(b1)
+    s.debug_elem_send_ctrl_cmd = OutPort(CmdType)
+    s.debug_elem_send_ctrl_data = OutPort(PayloadType)
+    s.debug_elem_send_ctrl_pred = OutPort(PredicateType)
+    s.debug_route_recv_val = [OutPort(b1) for _ in range(num_tile_inports)]
+    s.debug_route_recv_rdy = [OutPort(b1) for _ in range(num_tile_inports)]
+    s.debug_route_recv_data = [OutPort(PayloadType) for _ in range(num_tile_inports)]
+    s.debug_route_recv_pred = [OutPort(PredicateType) for _ in range(num_tile_inports)]
+    s.debug_tile_send_val = [OutPort(b1) for _ in range(num_tile_outports)]
+    s.debug_tile_send_rdy = [OutPort(b1) for _ in range(num_tile_outports)]
+    s.debug_tile_send_data = [OutPort(PayloadType) for _ in range(num_tile_outports)]
+    s.debug_tile_send_pred = [OutPort(PredicateType) for _ in range(num_tile_outports)]
+    s.debug_route_local_val = [OutPort(b1) for _ in range(num_fu_inports)]
+    s.debug_route_local_rdy = [OutPort(b1) for _ in range(num_fu_inports)]
+    s.debug_route_local_data = [OutPort(PayloadType) for _ in range(num_fu_inports)]
+    s.debug_route_local_pred = [OutPort(PredicateType) for _ in range(num_fu_inports)]
+    s.debug_reg_write_val = [OutPort(b1) for _ in range(num_fu_inports)]
+    s.debug_reg_write_data = [OutPort(PayloadType) for _ in range(num_fu_inports)]
+    s.debug_reg_write_pred = [OutPort(PredicateType) for _ in range(num_fu_inports)]
+    s.debug_reg_read_data = [OutPort(PayloadType) for _ in range(num_fu_inports)]
+    s.debug_reg_read_pred = [OutPort(PredicateType) for _ in range(num_fu_inports)]
+    s.debug_reg0_data = [OutPort(PayloadType) for _ in range(num_fu_inports)]
+    s.debug_reg0_pred = [OutPort(PredicateType) for _ in range(num_fu_inports)]
 
     # Data.
     s.to_mem_raddr = SendIfcRTL(DataAddrType)
@@ -120,8 +178,6 @@ class TileRTL(Component):
                          for _ in range(num_tile_inports)]
     s.routing_to_reg_channel = [ChannelRTL(DataType, latency = 1)
                                 for _ in range(num_fu_inports)]
-    s.reg_to_routing_channel = [ChannelRTL(DataType, latency = 1)
-                                for _ in range(num_fu_inports)]
 
     # The `tile_out_or_link` would "or" the outports of the
     # `tile_out_channel` and the FUs.
@@ -155,7 +211,41 @@ class TileRTL(Component):
     # Assigns crossbar id.
     s.routing_crossbar.crossbar_id //= PORT_INDEX_ROUTING_CROSSBAR
     s.fu_crossbar.crossbar_id //= PORT_INDEX_FU_CROSSBAR
-
+    s.debug_times //= s.ctrl_mem.debug_times
+    s.debug_ctrl_addr //= s.ctrl_mem.ctrl_addr_outport
+    s.debug_start //= s.ctrl_mem.debug_start
+    s.debug_send_ctrl_val //= s.ctrl_mem.debug_send_ctrl_val
+    s.debug_send_ctrl_rdy //= s.ctrl_mem.debug_send_ctrl_rdy
+    s.debug_op //= s.ctrl_mem.debug_send_ctrl_op
+    s.debug_prologue_count_fu //= s.ctrl_mem.debug_prologue_count_fu
+    s.debug_to_ctrl_val //= s.send_to_controller_pkt.val
+    s.debug_to_ctrl_cmd //= s.send_to_controller_pkt.msg.payload.cmd
+    s.debug_to_ctrl_data //= s.send_to_controller_pkt.msg.payload.data.payload
+    s.debug_to_ctrl_pred //= s.send_to_controller_pkt.msg.payload.data.predicate
+    s.debug_elem_recv_opt_val //= s.element.debug_recv_opt_val
+    s.debug_elem_recv_opt_rdy //= s.element.debug_recv_opt_rdy
+    s.debug_elem_recv_opt_op //= s.element.debug_recv_opt_op
+    s.debug_elem_recv_opt_fu_in0 //= s.element.debug_recv_opt_fu_in0
+    s.debug_elem_recv_opt_fu_in1 //= s.element.debug_recv_opt_fu_in1
+    s.debug_elem_recv_opt_vfp //= s.element.debug_recv_opt_vfp
+    s.debug_elem_recv_opt_is_last //= s.element.debug_recv_opt_is_last
+    s.debug_elem_selected_reached_vf //= s.element.debug_selected_reached_vf
+    s.debug_elem_selected_vf_counter //= s.element.debug_selected_vf_counter
+    for i in range(num_fu_inports):
+      s.debug_elem_recv_in_val[i] //= s.element.debug_recv_in_val[i]
+      s.debug_elem_recv_in_rdy[i] //= s.element.debug_recv_in_rdy[i]
+      s.debug_elem_recv_in_data[i] //= s.element.debug_recv_in_data[i]
+      s.debug_elem_recv_in_pred[i] //= s.element.debug_recv_in_pred[i]
+    for i in range(num_fu_outports):
+      s.debug_elem_send_out_val[i] //= s.element.debug_send_out_val[i]
+      s.debug_elem_send_out_rdy[i] //= s.element.debug_send_out_rdy[i]
+      s.debug_elem_send_out_data[i] //= s.element.debug_send_out_data[i]
+      s.debug_elem_send_out_pred[i] //= s.element.debug_send_out_pred[i]
+    s.debug_elem_send_ctrl_val //= s.element.debug_send_ctrl_val
+    s.debug_elem_send_ctrl_rdy //= s.element.debug_send_ctrl_rdy
+    s.debug_elem_send_ctrl_cmd //= s.element.debug_send_ctrl_cmd
+    s.debug_elem_send_ctrl_data //= s.element.debug_send_ctrl_data
+    s.debug_elem_send_ctrl_pred //= s.element.debug_send_ctrl_pred
     # Constant queue.
     s.element.recv_const //= s.const_mem.send_const
 
@@ -202,8 +292,6 @@ class TileRTL(Component):
     # inports, enabling reg -> outport DATA_MOV without occupying the FU.
     for i in range(num_fu_inports):
       s.register_cluster.send_data_to_routing_crossbar[i] //= \
-          s.reg_to_routing_channel[i].recv
-      s.reg_to_routing_channel[i].send //= \
           s.routing_crossbar.recv_data[num_tile_inports + i]
 
     # Connects specific xbar control signals to the corresponding crossbar.
@@ -387,8 +475,44 @@ class TileRTL(Component):
     def notify_crossbars_compute_status():
       s.routing_crossbar.compute_done @= s.element.recv_opt.rdy | s.element_done
       s.fu_crossbar.compute_done @= s.element.recv_opt.rdy | s.element_done
-      s.routing_crossbar_idle_drain @= ~s.routing_crossbar_done
-      s.fu_crossbar_idle_drain @= ~s.fu_crossbar_done
+      s.routing_crossbar_idle_drain @= ~s.routing_crossbar_done | ~s.ctrl_mem.send_ctrl.val
+      s.fu_crossbar_idle_drain @= ~s.fu_crossbar_done | ~s.ctrl_mem.send_ctrl.val
+
+    @update
+    def update_debug_observe():
+      for i in range(num_tile_inports):
+        s.debug_route_recv_val[i] @= s.routing_crossbar.recv_data[i].val
+        s.debug_route_recv_rdy[i] @= s.routing_crossbar.recv_data[i].rdy
+        s.debug_route_recv_data[i] @= s.routing_crossbar.recv_data[i].msg.payload
+        s.debug_route_recv_pred[i] @= s.routing_crossbar.recv_data[i].msg.predicate
+      for i in range(num_tile_outports):
+        s.debug_tile_send_val[i] @= s.send_data[i].val
+        s.debug_tile_send_rdy[i] @= s.send_data[i].rdy
+        s.debug_tile_send_data[i] @= s.send_data[i].msg.payload
+        s.debug_tile_send_pred[i] @= s.send_data[i].msg.predicate
+      for i in range(num_fu_inports):
+        s.debug_route_local_val[i] @= \
+            s.routing_crossbar.send_data[num_tile_outports + i].val
+        s.debug_route_local_rdy[i] @= \
+            s.routing_crossbar.send_data[num_tile_outports + i].rdy
+        s.debug_route_local_data[i] @= \
+            s.routing_crossbar.send_data[num_tile_outports + i].msg.payload
+        s.debug_route_local_pred[i] @= \
+            s.routing_crossbar.send_data[num_tile_outports + i].msg.predicate
+        s.debug_reg_write_val[i] @= \
+            s.register_cluster.write_valid_from_routing_crossbar[i]
+        s.debug_reg_write_data[i] @= \
+            s.register_cluster.write_data_from_routing_crossbar[i].payload
+        s.debug_reg_write_pred[i] @= \
+            s.register_cluster.write_data_from_routing_crossbar[i].predicate
+        s.debug_reg_read_data[i] @= \
+            s.register_cluster.debug_reg_read[i].payload
+        s.debug_reg_read_pred[i] @= \
+            s.register_cluster.debug_reg_read[i].predicate
+        s.debug_reg0_data[i] @= \
+            s.register_cluster.debug_reg0[i].payload
+        s.debug_reg0_pred[i] @= \
+            s.register_cluster.debug_reg0[i].predicate
 
   # Line trace
   def line_trace(s):

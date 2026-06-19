@@ -40,6 +40,13 @@ class FlexibleFuRTL(Component):
     s.CtrlType = CtrlPktType.get_field_type(kAttrPayload).get_field_type(kAttrCtrl)
     s.CtrlAddrType = CtrlPktType.get_field_type(kAttrPayload).get_field_type(kAttrCtrlAddr)
     s.CgraPayloadType = CtrlPktType.get_field_type(kAttrPayload)
+    s.PayloadType = s.DataType.get_field_type(kAttrPayload)
+    s.PredicateType = s.DataType.get_field_type(kAttrPredicate)
+    s.CmdType = s.CgraPayloadType.get_field_type(kAttrCmd)
+    s.OpType = s.CtrlType.get_field_type(kAttrOperation)
+    s.FuInType = s.CtrlType.get_field_type(kAttrFuIn)[0]
+    s.VectorFactorPowerType = s.CtrlType.get_field_type(kAttrVectorFactorPower)
+    s.VectorFactorCounterType = mk_bits(8)
     CountType = mk_bits(clog2(num_entries + 1))
     s.ctrl_addr_inport = InPort(s.CtrlAddrType)
     PrologueCountType = mk_bits(clog2(PROLOGUE_MAX_COUNT + 1))
@@ -54,6 +61,29 @@ class FlexibleFuRTL(Component):
     s.recv_from_ctrl_mem = RecvIfcRTL(s.CgraPayloadType)
     # Interfaces for streaming LD.
     s.recv_pkt_from_controller = RecvIfcRTL(CtrlPktType)
+
+    s.debug_recv_opt_val = OutPort(b1)
+    s.debug_recv_opt_rdy = OutPort(b1)
+    s.debug_recv_opt_op = OutPort(s.OpType)
+    s.debug_recv_opt_fu_in0 = OutPort(s.FuInType)
+    s.debug_recv_opt_fu_in1 = OutPort(s.FuInType)
+    s.debug_recv_opt_vfp = OutPort(s.VectorFactorPowerType)
+    s.debug_recv_opt_is_last = OutPort(b1)
+    s.debug_selected_reached_vf = OutPort(b1)
+    s.debug_selected_vf_counter = OutPort(s.VectorFactorCounterType)
+    s.debug_recv_in_val = [OutPort(b1) for _ in range(num_inports)]
+    s.debug_recv_in_rdy = [OutPort(b1) for _ in range(num_inports)]
+    s.debug_recv_in_data = [OutPort(s.PayloadType) for _ in range(num_inports)]
+    s.debug_recv_in_pred = [OutPort(s.PredicateType) for _ in range(num_inports)]
+    s.debug_send_out_val = [OutPort(b1) for _ in range(num_outports)]
+    s.debug_send_out_rdy = [OutPort(b1) for _ in range(num_outports)]
+    s.debug_send_out_data = [OutPort(s.PayloadType) for _ in range(num_outports)]
+    s.debug_send_out_pred = [OutPort(s.PredicateType) for _ in range(num_outports)]
+    s.debug_send_ctrl_val = OutPort(b1)
+    s.debug_send_ctrl_rdy = OutPort(b1)
+    s.debug_send_ctrl_cmd = OutPort(s.CmdType)
+    s.debug_send_ctrl_data = OutPort(s.PayloadType)
+    s.debug_send_ctrl_pred = OutPort(s.PredicateType)
 
     s.to_mem_raddr = [SendIfcRTL(s.AddrType) for _ in range(s.fu_list_size)]
     s.from_mem_rdata = [RecvIfcRTL(s.DataType) for _ in range(s.fu_list_size)]
@@ -79,6 +109,34 @@ class FlexibleFuRTL(Component):
     s.op_uses_const = Wire(b1)
 
     # Connection.
+    s.debug_recv_opt_val //= s.recv_opt.val
+    s.debug_recv_opt_rdy //= s.recv_opt.rdy
+    s.debug_recv_opt_op //= s.recv_opt.msg.operation
+    s.debug_recv_opt_fu_in0 //= s.recv_opt.msg.fu_in[0]
+    s.debug_recv_opt_fu_in1 //= s.recv_opt.msg.fu_in[1]
+    s.debug_recv_opt_vfp //= s.recv_opt.msg.vector_factor_power
+    s.debug_recv_opt_is_last //= s.recv_opt.msg.is_last_ctrl
+    for i in range(num_inports):
+      s.debug_recv_in_val[i] //= s.recv_in[i].val
+      s.debug_recv_in_rdy[i] //= s.recv_in[i].rdy
+      s.debug_recv_in_data[i] //= s.recv_in[i].msg.payload
+      s.debug_recv_in_pred[i] //= s.recv_in[i].msg.predicate
+    for i in range(num_outports):
+      s.debug_send_out_val[i] //= s.send_out[i].val
+      s.debug_send_out_rdy[i] //= s.send_out[i].rdy
+      s.debug_send_out_data[i] //= s.send_out[i].msg.payload
+      s.debug_send_out_pred[i] //= s.send_out[i].msg.predicate
+    s.debug_send_ctrl_val //= s.send_to_ctrl_mem.val
+    s.debug_send_ctrl_rdy //= s.send_to_ctrl_mem.rdy
+    s.debug_send_ctrl_cmd //= s.send_to_ctrl_mem.msg.cmd
+    s.debug_send_ctrl_data //= s.send_to_ctrl_mem.msg.data.payload
+    s.debug_send_ctrl_pred //= s.send_to_ctrl_mem.msg.data.predicate
+
+    @update
+    def update_debug_selected_fu():
+      s.debug_selected_reached_vf @= b1(0)
+      s.debug_selected_vf_counter @= s.VectorFactorCounterType(0)
+
     for i in range(len(FuList)):
       s.to_mem_raddr[i] //= s.fu[i].to_mem_raddr
       s.from_mem_rdata[i] //= s.fu[i].from_mem_rdata
@@ -156,6 +214,10 @@ class FlexibleFuRTL(Component):
 
         # opt connection.
         s.fu[i].recv_opt.msg @= s.recv_opt.msg
+        # During FU prologue, crossbars still need the real ctrl word for
+        # routing, but the selected FU must not execute the real operation.
+        if s.prologue_count_inport != 0:
+          s.fu[i].recv_opt.msg.operation @= OPT_NAH
         s.fu[i].recv_opt.val @= s.recv_opt.val
         s.fu_recv_opt_rdy_vector[i] @= s.fu[i].recv_opt.rdy
 
@@ -168,12 +230,8 @@ class FlexibleFuRTL(Component):
           s.fu[i].send_out[j].rdy @= s.send_out[j].rdy
 
       # During prologue, FUs see OPT_NAH so none assert recv_const.rdy.
-      # But if the real operation would consume a const, we must still advance
-      # the const queue to keep it in sync with the ctrl pointer.
-      # We assert recv_const.rdy during prologue if:
-      #   1. prologue is active (prologue_count_inport != 0)
-      #   2. the real operation uses a const (op_uses_const)
-      #   3. the const queue has data (recv_const.val)
+      # If the skipped real op would have consumed a const, advance the const
+      # queue with the ctrl pointer to keep later const reads aligned.
       s.recv_const.rdy @= reduce_or(s.fu_recv_const_rdy_vector) | \
                            ((s.prologue_count_inport != 0) & s.op_uses_const & s.recv_const.val)
       # Operation (especially mem access) won't perform more than once, because once the

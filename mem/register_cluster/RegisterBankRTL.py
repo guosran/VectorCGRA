@@ -41,6 +41,7 @@ class RegisterBankRTL(Component):
     # the design and handshake.
     s.inport_wdata = [InPort(DataType) for _ in range(3)]
     s.inport_valid = [InPort(mk_bits(1)) for _ in range(3)]
+    s.debug_reg0 = OutPort(DataType)
 
     # Component
     s.reg_file = RegisterFile(DataType, num_registers, rd_ports = 1,
@@ -67,6 +68,22 @@ class RegisterBankRTL(Component):
           s.reg_file.waddr[0] @= s.inport_opt.write_reg_idx[reg_bank_id]
           s.reg_file.wdata[0] @= s.inport_wdata[write_reg_from - 1]
           s.reg_file.wen[0] @= 1
+
+    @update_ff
+    def update_debug_reg0():
+      if s.reset:
+        s.debug_reg0 <<= DataType()
+      else:
+        write_reg_from = s.inport_opt.write_reg_from[reg_bank_id]
+        if write_reg_from > 0:
+          write_port = write_reg_from - 1
+          if s.inport_valid[write_port] & \
+             (s.inport_opt.write_reg_idx[reg_bank_id] == AddrType(0)):
+            s.debug_reg0 <<= s.inport_wdata[write_port]
+          else:
+            s.debug_reg0 <<= s.debug_reg0
+        else:
+          s.debug_reg0 <<= s.debug_reg0
 
     @update
     def update_send_val():

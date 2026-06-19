@@ -62,6 +62,12 @@ class CtrlMemDynamicRTL(Component):
     s.cgra_id = InPort(mk_bits(max(1, clog2(num_cgras))))
     s.tile_id = InPort(mk_bits(clog2(num_tiles + 1)))
     s.ctrl_addr_outport = OutPort(CtrlAddrType)
+    s.debug_times = OutPort(TimeType)
+    s.debug_start = OutPort(b1)
+    s.debug_send_ctrl_val = OutPort(b1)
+    s.debug_send_ctrl_rdy = OutPort(b1)
+    s.debug_send_ctrl_op = OutPort(CtrlType.get_field_type(kAttrOperation))
+    s.debug_prologue_count_fu = OutPort(PrologueCountType)
 
     # Components.
     s.reg_file = RegisterFile(CtrlType, ctrl_mem_size, 1, 1)
@@ -90,6 +96,12 @@ class CtrlMemDynamicRTL(Component):
     # Connections.
     s.recv_pkt_from_controller //= s.recv_pkt_from_controller_queue.recv
     s.recv_from_element //= s.recv_from_element_queue.recv
+    s.debug_times //= s.times
+    s.debug_start //= s.start_iterate_ctrl
+    s.debug_send_ctrl_val //= s.send_ctrl.val
+    s.debug_send_ctrl_rdy //= s.send_ctrl.rdy
+    s.debug_send_ctrl_op //= s.send_ctrl.msg.operation
+    s.debug_prologue_count_fu //= s.prologue_count_outport_fu
 
     @update
     def update_msg():
@@ -213,14 +225,16 @@ class CtrlMemDynamicRTL(Component):
         s.send_ctrl.msg.routing_xbar_outport[i] @= s.reg_file.rdata[0].routing_xbar_outport[i]
         s.send_ctrl.msg.fu_xbar_outport[i]      @= s.reg_file.rdata[0].fu_xbar_outport[i]
       s.send_ctrl.msg.vector_factor_power @= s.reg_file.rdata[0].vector_factor_power
-      s.send_ctrl.msg.is_last_ctrl        @= s.reg_file.rdata[0].is_last_ctrl
+      s.send_ctrl.msg.is_last_ctrl        @= \
+          s.reg_file.rdata[0].is_last_ctrl | \
+          ((s.total_ctrl_steps_val > 0) &
+           (s.times == s.total_ctrl_steps_val - TimeType(1)))
       # Keep downstream datapath blocks inactive unless this cycle is
-      # actually issuing a control word, and keep FUs idle during
-      # FU-crossbar prologue cycles.
+      # actually issuing a control word. FU prologue is handled in
+      # FlexibleFuRTL so the real control word remains visible to the
+      # crossbars and debug signals.
       if ~s.send_ctrl.val:
         s.send_ctrl.msg.operation @= OPT_START
-      elif s.prologue_count_outport_fu != 0:
-        s.send_ctrl.msg.operation @= OPT_NAH
       else:
         s.send_ctrl.msg.operation @= s.reg_file.rdata[0].operation
 

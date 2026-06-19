@@ -245,7 +245,8 @@ class InstructionSignals:
                  B1Type,
                  B2Type,
                  RegIdxType,
-                 CtrlAddrType):
+                 CtrlAddrType,
+                 accumulate_add_to_src_reg=False):
         # types
         self.IntraCgraPktType = IntraCgraPktType
         self.CgraPayloadType = CgraPayloadType
@@ -258,6 +259,7 @@ class InstructionSignals:
         self.B2Type = B2Type
         self.RegIdxType = RegIdxType
         self.CtrlAddrType = CtrlAddrType
+        self.accumulate_add_to_src_reg = accumulate_add_to_src_reg
 
         # inputs
         self.id_ = id_
@@ -352,16 +354,26 @@ class InstructionSignals:
                 except Exception as e:
                     src_operands = []
                 try:
-                    dst_operands = operation['dst_operands']
+                    dst_operands = list(operation['dst_operands'])
                 except Exception as e:
                     dst_operands = []
 
                 # find all the const
                 for index, src_operand in enumerate(src_operands):
                     if _type(src_operand) == 'IMM':
-                        const_operands.append(src_operand)
+                        const_operands.append((src_operand, operation["time_step"]))
                         # delete it from the src_operands since it is implicit in vectorCGRA
                         del src_operands[index]
+
+                if self.accumulate_add_to_src_reg and operation_opcode == 'ADD':
+                    reg_src_operands = [
+                        operand for operand in src_operands
+                        if _type(operand) == 'REG'
+                    ]
+                    has_reg_dst = any(_type(operand) == 'REG'
+                                      for operand in dst_operands)
+                    if reg_src_operands and not has_reg_dst:
+                        dst_operands.append(reg_src_operands[0])
 
                 # for not_take_up_fu_operation
                 if not _is_take_up_fu_operation(operation):
@@ -634,7 +646,9 @@ class TileSignals:
                 CtrlAddrType,
                 DataAddrType,
                 arg_map=None,
-                gep_stride=None):
+                gep_stride=None,
+                use_time_step_ctrl_addr=False,
+                accumulate_add_to_src_reg=False):
         self.CtrlType = CtrlType
         self.IntraCgraPktType = IntraCgraPktType
         self.CgraPayloadType = CgraPayloadType
@@ -654,6 +668,8 @@ class TileSignals:
         self.DataAddrType = DataAddrType
         self.arg_map = arg_map if arg_map is not None else {}
         self.gep_stride = gep_stride
+        self.use_time_step_ctrl_addr = use_time_step_ctrl_addr
+        self.accumulate_add_to_src_reg = accumulate_add_to_src_reg
         # constants
         self.CMD_CONST_ = CMD_CONST_input
         self.CMD_CONFIG_COUNT_PER_ITER_ = CMD_CONFIG_COUNT_PER_ITER_input
@@ -741,16 +757,112 @@ class TileSignals:
                                                                      ctrl = self.CtrlType(fu_xbar_outport = [self.FuOutType(0)] * 8),
                                                                      # WARN:by now, only support one result for each operation
                                                                      data = self.DataType(count, 1)))
+    def expandInstructionsByTimeStep(self):
+        expanded = []
+        for instruction in self.instructions:
+            grouped_ops = {}
+            for operation in instruction['operations']:
+                ctrl_addr = operation['time_step'] % self.ii
+                expanded_operation = dict(operation)
+                grouped_ops.setdefault(ctrl_addr, []).append(expanded_operation)
+
+            for ctrl_addr in sorted(grouped_ops):
+                expanded_instruction = dict(instruction)
+                expanded_instruction['index_per_ii'] = ctrl_addr
+                expanded_instruction['operations'] = grouped_ops[ctrl_addr]
+                expanded.append(expanded_instruction)
+        return expanded
+
     def makeTileSignals(self):
         consts = []
         all_signals = []
         all_instruction_signals = []
         prologue_signals = []
         has_addrs = []
+        instructions = self.expandInstructionsByTimeStep() \
+            if self.use_time_step_ctrl_addr else self.instructions
+
+        local_accumulator_regs = set()
+        if self.accumulate_add_to_src_reg:
+            for instruction in instructions:
+                for operation in instruction['operations']:
+                    if operation.get('opcode') != 'ADD':
+                        continue
+                    src_operands = operation.get('src_operands', [])
+                    dst_operands = operation.get('dst_operands', [])
+                    if any(_type(operand) == 'REG' for operand in dst_operands):
+                        continue
+                    for operand in src_operands:
+                        if _type(operand) == 'REG':
+                            local_accumulator_regs.add(operand['operand'])
+
+        if local_accumulator_regs:
+            used_regs = set()
+            for instruction in instructions:
+                for operation in instruction['operations']:
+                    for operand in operation.get('src_operands', []):
+                        if _type(operand) == 'REG':
+                            used_regs.add(operand['operand'])
+                    for operand in operation.get('dst_operands', []):
+                        if _type(operand) == 'REG':
+                            used_regs.add(operand['operand'])
+
+            scratch_for_acc = {}
+            for reg_name in local_accumulator_regs:
+                cluster_base = (int(reg_name[1:]) // REG_CLUSTER_SIZE) * REG_CLUSTER_SIZE
+                for reg_idx in range(cluster_base + REG_CLUSTER_SIZE - 1,
+                                     cluster_base - 1,
+                                     -1):
+                    candidate = f"${reg_idx}"
+                    if candidate != reg_name and candidate not in used_regs:
+                        scratch_for_acc[reg_name] = candidate
+                        used_regs.add(candidate)
+                        break
+                if reg_name not in scratch_for_acc:
+                    raise ValueError(
+                        f"No scratch register available to drain accumulator feedback for {reg_name}")
+
+            filtered_instructions = []
+            for instruction in instructions:
+                filtered_ops = []
+                for operation in instruction['operations']:
+                    src_operands = operation.get('src_operands', [])
+                    dst_operands = operation.get('dst_operands', [])
+                    is_external_acc_feedback = \
+                        operation.get('opcode') == 'DATA_MOV' and \
+                        len(src_operands) == 1 and \
+                        _type(src_operands[0]) == 'PORT' and \
+                        any(_type(dst) == 'REG' and
+                            dst['operand'] in local_accumulator_regs
+                            for dst in dst_operands)
+                    if is_external_acc_feedback:
+                        drain_operation = dict(operation)
+                        drain_dsts = []
+                        for dst in dst_operands:
+                            if _type(dst) == 'REG' and \
+                               dst['operand'] in local_accumulator_regs:
+                                scratch_dst = dict(dst)
+                                scratch_dst['operand'] = \
+                                    scratch_for_acc[dst['operand']]
+                                drain_dsts.append(scratch_dst)
+                            else:
+                                drain_dsts.append(dst)
+                        drain_operation['dst_operands'] = drain_dsts
+                        filtered_ops.append(drain_operation)
+                    else:
+                        filtered_ops.append(operation)
+
+                if filtered_ops:
+                    filtered_instruction = dict(instruction)
+                    filtered_instruction['operations'] = filtered_ops
+                    filtered_instructions.append(filtered_instruction)
+            instructions = filtered_instructions
+
         used_addrs = {
             instruction['index_per_ii']
-            for instruction in self.instructions
+            for instruction in instructions
         }
+
         shifted_ctrl_addrs = {}
 
         def is_shiftable_port_to_port(instruction):
@@ -765,7 +877,7 @@ class TileSignals:
                     return False
             return True
 
-        for instruction in self.instructions:
+        for instruction in instructions:
             ctrl_addr = instruction['index_per_ii']
             shifted_addr = (ctrl_addr + 1) % self.ii
             if False and \
@@ -778,7 +890,7 @@ class TileSignals:
 
         # build all the instruction signals and get all the const
         import sys
-        for instr_idx_dbg, instruction in enumerate(self.instructions):
+        for instr_idx_dbg, instruction in enumerate(instructions):
             # Suppress verbose per-instruction output for speed
             pass
              # do necessary sanitization
@@ -848,20 +960,25 @@ class TileSignals:
                 B1Type = self.B1Type,
                 B2Type = self.B2Type,
                 RegIdxType = self.RegIdxType,
-                CtrlAddrType = self.CtrlAddrType)
+                CtrlAddrType = self.CtrlAddrType,
+                accumulate_add_to_src_reg = self.accumulate_add_to_src_reg)
             all_instruction_signals.append(instruction_signals)
 
             const = instruction_signals.buildCtrlPkt()
             if const is not None:
                 consts.extend(const)
 
-        print(f"[Core {self.id_}] All {len(self.instructions)} instructions processed, building const signals...")
+        print(f"[Core {self.id_}] All {len(instructions)} instructions processed, building const signals...")
         sys.stdout.flush()
 
         # make the const signals
         #print("\n\n\n\n\n\n\n\n\n\n\n\n\n")
+        # ConstQueueDynamicRTL consumes constants in controller execution order
+        # (the order CONFIG packets are generated), not in scheduled time_step
+        # order. Some schedules have non-monotonic time_steps across
+        # index_per_ii slots, so sorting here misaligns const-using ops.
         #print(consts)
-        for idx, const_operand in enumerate(consts):
+        for idx, (const_operand, _) in enumerate(consts):
             operand_str = const_operand['operand']
             if operand_str.startswith('#'):
                 const_val = int(operand_str[1:])
@@ -878,7 +995,7 @@ class TileSignals:
         # If any instruction uses 2D GEP, send stride configuration packet
         if self.gep_stride is not None:
             has_gep_2d = False
-            for instruction in self.instructions:
+            for instruction in instructions:
                 for operation in instruction['operations']:
                     if operation['opcode'] == 'GEP' and _is_take_up_fu_operation(operation):
                         try:
@@ -993,7 +1110,9 @@ class ScriptFactory:
                  DataAddrType,
                  num_registers_per_reg_bank=None,
                  arg_map=None,
-                 gep_stride=None):
+                 gep_stride=None,
+                 use_time_step_ctrl_addr=False,
+                 accumulate_add_to_src_reg=False):
         # Allow overriding the default register cluster size.
         global REG_CLUSTER_SIZE
         if num_registers_per_reg_bank is not None:
@@ -1003,6 +1122,8 @@ class ScriptFactory:
         # that reference function parameters.
         self.arg_map = arg_map if arg_map is not None else {}
         self.gep_stride = gep_stride  # stride for 2D GEP operations
+        self.use_time_step_ctrl_addr = use_time_step_ctrl_addr
+        self.accumulate_add_to_src_reg = accumulate_add_to_src_reg
         self.yaml_struct = yaml.load(open(path, 'r'), Loader=yaml.FullLoader)
         self.path = path
         self.CtrlType = CtrlType
@@ -1071,6 +1192,8 @@ class ScriptFactory:
                 DataAddrType = self.DataAddrType,
                 arg_map = self.arg_map,
                 gep_stride = self.gep_stride,
+                use_time_step_ctrl_addr = self.use_time_step_ctrl_addr,
+                accumulate_add_to_src_reg = self.accumulate_add_to_src_reg,
                 )
             tile_signals = tile_signals.makeTileSignals()
             pkts[(x, y)] = tile_signals

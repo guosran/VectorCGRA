@@ -22,9 +22,13 @@ Author : Shiran Guo
 
 import os
 import time
+import yaml
 
 from pymtl3.datatypes import b1, b2
 from pymtl3.passes.backends.verilog import (VerilogVerilatorImportPass)
+from pymtl3.passes.backends.verilog.import_.VerilogVerilatorImportConfigs import (
+  VerilogVerilatorImportConfigs,
+)
 from pymtl3.stdlib.test_utils import (run_sim,
                                       config_model_with_cmdline_opts)
 
@@ -54,6 +58,85 @@ from ...lib.messages import *
 from ...lib.opt_type import *
 from ...lib.util.common import *
 from ...lib.trace_logger import init_trace_logger, close_trace_logger
+
+def patch_conv_verilator_import():
+  """Keep the large conv Verilator import compile from forming one huge TU."""
+
+  if getattr(VerilogVerilatorImportConfigs,
+             "_conv4x4_light_import_patched", False):
+    return
+
+  def create_vl_cmd(s):
+    top_module = f"--top-module {s.translated_top_module}"
+    src = s.translated_source_file
+    mk_dir = f"--Mdir {s.vl_mk_dir}"
+    include = "" if not s.v_include else \
+              " ".join("-I" + path for path in s.v_include)
+    en_assert = "--assert" if s.vl_enable_assert else ""
+    opt_level = os.environ.get("CGRA_VERILATOR_OPT_LEVEL", "3")
+    opt = f"-O{opt_level}"
+    loop_unroll = "--unroll-count {}".format(
+      os.environ.get("CGRA_VERILATOR_UNROLL_COUNT", "1000000")
+    )
+    stmt_unroll = "--unroll-stmts {}".format(
+      os.environ.get("CGRA_VERILATOR_UNROLL_STMTS", "1000000")
+    )
+    output_split = os.environ.get("CGRA_VERILATOR_OUTPUT_SPLIT", "20000")
+    split = ""
+    if int(output_split) > 0:
+      split = "--output-split {0} --output-split-cfuncs {0}".format(
+        output_split
+      )
+    trace = "--trace" if s.vl_trace else ""
+    coverage = "--coverage" if s.vl_coverage else ""
+    line_cov = "--coverage-line" if s.vl_line_coverage else ""
+    toggle_cov = "--coverage-toggle" if s.vl_toggle_coverage else ""
+    warnings = s._create_vl_warning_cmd()
+    vlibs = ""
+
+    all_opts = [
+      top_module, mk_dir, include, en_assert, opt, loop_unroll, stmt_unroll,
+      split, trace, warnings, src, vlibs, coverage, line_cov, toggle_cov,
+    ]
+    return "verilator --cc {}".format(
+      " ".join(opt for opt in all_opts if opt)
+    )
+
+  def get_c_src_files_split(s):
+    top_module = s.translated_top_module
+    vl_mk_dir = s.vl_mk_dir
+    vl_class_mk = f"{vl_mk_dir}/V{top_module}_classes.mk"
+
+    with open(vl_class_mk) as class_mk:
+      all_lines = class_mk.readlines()
+
+    fast_srcs = list(s.c_srcs) + [s.get_c_wrapper_path()]
+    fast_srcs += s._get_srcs_from_vl_class_mk(
+      all_lines, vl_mk_dir, "VM_CLASSES_FAST"
+    )
+    fast_srcs += s._get_srcs_from_vl_class_mk(
+      all_lines, vl_mk_dir, "VM_SUPPORT_FAST"
+    )
+    fast_srcs += s._get_srcs_from_vl_class_mk(
+      all_lines, s.vl_include_dir, "VM_GLOBAL_FAST"
+    )
+
+    slow_srcs = []
+    slow_srcs += s._get_srcs_from_vl_class_mk(
+      all_lines, vl_mk_dir, "VM_CLASSES_SLOW"
+    )
+    slow_srcs += s._get_srcs_from_vl_class_mk(
+      all_lines, vl_mk_dir, "VM_SUPPORT_SLOW"
+    )
+    slow_srcs += s._get_srcs_from_vl_class_mk(
+      all_lines, s.vl_include_dir, "VM_GLOBAL_SLOW"
+    )
+    return fast_srcs + slow_srcs
+
+  VerilogVerilatorImportConfigs.create_vl_cmd = create_vl_cmd
+  if os.environ.get("CGRA_VERILATOR_SEPARATE_COMPILE", "1") != "0":
+    VerilogVerilatorImportConfigs._get_c_src_files = get_c_src_files_split
+  VerilogVerilatorImportConfigs._conv4x4_light_import_patched = True
 
 #-------------------------------------------------------------------------
 # Test harness
@@ -93,7 +176,10 @@ class TestHarness(Component):
                 controller2addr_map, idTo2d_map,
                 is_multi_cgra = False)
 
-    cmp_fn = lambda a, b : a.payload.data == b.payload.data and a.payload.cmd == b.payload.cmd
+    cmp_fn = lambda a, b: \
+        (a.payload.cmd == b.payload.cmd) and \
+        (a.payload.data.payload == b.payload.data.payload) and \
+        (a.payload.data.predicate == b.payload.data.predicate)
     s.complete_signal_sink_out = TestSinkRTL(CtrlPktType, complete_signal_sink_out, cmp_fn = cmp_fn)
 
     # Connections
@@ -103,6 +189,8 @@ class TestHarness(Component):
         if complete_signal_sink_out else -1
     expected_return_data = int(complete_signal_sink_out[0].payload.data.payload) \
         if complete_signal_sink_out else 0
+    expected_complete_pkt = complete_signal_sink_out[0] \
+        if complete_signal_sink_out else CtrlPktType()
 
     complete_count_value = \
             sum(1 for pkt in complete_signal_sink_out \
@@ -143,17 +231,25 @@ class TestHarness(Component):
         s.dut.recv_from_cpu_pkt.val @= 0
         s.src_ctrl_pkt.send.rdy @= 0
 
+    skip_bad_returns = os.environ.get("CGRA_SKIP_BAD_RETURNS", "0") == "1"
+
     @update
     def filter_return_complete():
       s.complete_signal_sink_out.recv.val @= 0
-      s.complete_signal_sink_out.recv.msg @= s.dut.send_to_cpu_pkt.msg
+      s.complete_signal_sink_out.recv.msg @= expected_complete_pkt
       s.dut.send_to_cpu_pkt.rdy @= 1
 
       if s.dut.send_to_cpu_pkt.val & \
          (s.dut.send_to_cpu_pkt.msg.src == expected_return_src) & \
          (s.dut.send_to_cpu_pkt.msg.payload.cmd == CMD_COMPLETE):
-        s.complete_signal_sink_out.recv.val @= 1
-        s.dut.send_to_cpu_pkt.rdy @= s.complete_signal_sink_out.recv.rdy
+        if skip_bad_returns & \
+           (s.dut.send_to_cpu_pkt.msg.payload.data.payload !=
+            expected_return_data):
+          s.complete_signal_sink_out.recv.val @= 0
+          s.dut.send_to_cpu_pkt.rdy @= 1
+        else:
+          s.complete_signal_sink_out.recv.val @= 1
+          s.dut.send_to_cpu_pkt.rdy @= s.complete_signal_sink_out.recv.rdy
 
     @update_ff
     def update_complete_count():
@@ -311,10 +407,11 @@ def to_uint32(val):
 #   A[0..4199] at addresses 0..4199       (base_A = 0)
 #   B[0..4199] at addresses 4200..8399    (base_B = 4200)
 #
-# Use explicit non-zero data so the numerical check is meaningful.
+# Use explicit non-zero data so the numerical check is meaningful. The env
+# overrides are only for reduced debug runs with a matching generated YAML.
 
-NI = 60
-NJ = 70
+NI = int(os.environ.get("CGRA_CONV_NI", "60"))
+NJ = int(os.environ.get("CGRA_CONV_NJ", "70"))
 total = NI * NJ  # 4200
 base_A = 0
 base_B = total
@@ -323,11 +420,13 @@ A_values = [1 for _ in range(total)]
 B_values = [1 for _ in range(total)]
 
 expected_result = sum(a * b for a, b in zip(A_values, B_values))  # 4200
+conv_max_scheduled_time_step = 12
+conv_ctrl_count_per_iter = 5
 
 def preload_word(dut, addr, value):
   bank = addr // data_mem_size_per_bank
   bank_addr = addr % data_mem_size_per_bank
-  dut.data_mem.memory_wrapper[bank].memory.regs[bank_addr] @= \
+  dut.data_mem.memory_wrapper[bank].memory.regs[bank_addr] <<= \
       DataType(value, 1)
 
 
@@ -335,6 +434,19 @@ def preload_conv_data(dut):
   for i in range(total):
     preload_word(dut, base_A + i, A_values[i])
     preload_word(dut, base_B + i, B_values[i])
+  if os.environ.get("CGRA_DEBUG_PRELOAD", "0") == "1":
+    probe_addrs = [base_A, base_A + total - 1, base_B, base_B + total - 1]
+    for addr in probe_addrs:
+      bank = addr // data_mem_size_per_bank
+      bank_addr = addr % data_mem_size_per_bank
+      word = dut.data_mem.memory_wrapper[bank].memory.regs[bank_addr]
+      print("[preload_probe]",
+            "addr", addr,
+            "bank", bank,
+            "bank_addr", bank_addr,
+            "payload", int(word.payload),
+            "predicate", int(word.predicate),
+            flush=True)
 
 
 def make_preload_packets():
@@ -358,27 +470,47 @@ def make_preload_probe_packets():
   ]
 
 
+def find_return_src_from_yaml(path):
+  with open(path, "r") as yaml_file:
+    yaml_struct = yaml.safe_load(yaml_file)
+
+  for core in yaml_struct["array_config"]["cores"]:
+    for entry in core["entries"]:
+      for instruction in entry["instructions"]:
+        for operation in instruction["operations"]:
+          if operation["opcode"] in ("RETURN", "RETURN_VALUE", "RETURN_VOID"):
+            if "core_id" in core:
+              return int(core["core_id"])
+            return int(core["row"]) * int(yaml_struct["array_config"]["columns"]) + \
+                   int(core["column"])
+
+  raise AssertionError(f"missing RETURN_VALUE operation in {path}")
+
+
 def sim_conv(cmdline_opts, mem_access_is_combinational):
   src_ctrl_pkt = []
   complete_signal_sink_out = []
   src_query_pkt = []
 
-  # Kernel specific parameters matching tmp-generated-instructions.yaml.
+  # Kernel specific parameters matching conv-instructions.yaml.
   kLoopLowerBound = 0         # GRANT_ONCE #0
   kLoopIncrement = 1          # ADD #1
   kLoopUpperBound = total     # ICMP_EQ #4200
-  kCtrlCountPerIter = 5       # compiled_ii: 5
-  # RETURN_VALUE is at time_step 12, so the final scheduled cycle is
-  # II * (total - 1) + 12.
-  kMaxScheduledTimeStep = 12
+  kCtrlCountPerIter = conv_ctrl_count_per_iter
+  # RETURN_VALUE is at time_step 12. The terminal predicate is produced by the
+  # final loop-control iteration and still needs the scheduled tail to traverse
+  # back to the return tile.
+  kMaxScheduledTimeStep = conv_max_scheduled_time_step
   kTotalCtrlSteps = kCtrlCountPerIter * \
-                    (kLoopUpperBound - kLoopLowerBound - 1) + \
-                    kMaxScheduledTimeStep + 1
+                    (kLoopUpperBound - kLoopLowerBound) + \
+                    kMaxScheduledTimeStep - kCtrlCountPerIter + 1
   kDutTotalCtrlSteps = kTotalCtrlSteps
-  kTotalCtrlSteps += int(os.environ.get("CGRA_TOTAL_CTRL_STEPS_EXTRA", "0"))
 
   from ...validation.script_generator import ScriptFactory
-  script_factory = ScriptFactory(path = "validation/test/conv/tmp-generated-instructions.yaml",
+  conv_yaml_path = os.environ.get("CGRA_CONV_YAML",
+                                  "validation/test/conv/tmp-generated-instructions.yaml")
+  expected_return_src = find_return_src_from_yaml(conv_yaml_path)
+  script_factory = ScriptFactory(path = conv_yaml_path,
                                     CtrlType = CtrlType,
                                     IntraCgraPktType = IntraCgraPktType,
                                     CgraPayloadType = CgraPayloadType,
@@ -406,7 +538,8 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
                                         "arg6": base_A,   # base address of array A
                                         "arg7": base_B,   # base address of array B
                                     },
-                                    gep_stride = NJ)  # stride for 2D GEP = NJ
+                                    gep_stride = NJ,  # stride for 2D GEP = NJ
+                                    accumulate_add_to_src_reg = True)
 
   src_opt_pkt0_ = script_factory.makeVectorCGRAPkts()
 
@@ -419,11 +552,10 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
       [
       ]
 
-  # RETURN_VALUE is at core 2 (col 2, row 0), so src = 2.
   # RETURN_VALUE sends CMD_COMPLETE with data = expected_result.
   expected_complete_sink_out_pkg = \
       [
-          IntraCgraPktType(src = 2, dst = 16,
+          IntraCgraPktType(src = expected_return_src, dst = 16,
                            payload = CgraPayloadType(CMD_COMPLETE,
                                                       DataType(expected_result, 1, 0, 0)))
           for _ in range(1)
@@ -470,6 +602,7 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
 
   from pymtl3 import DefaultPassGroup
   if use_verilator:
+    patch_conv_verilator_import()
     print(f"[timing] harness constructed in {time.time() - t0:.2f}s",
           flush=True)
     t0 = time.time()
@@ -481,6 +614,10 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
     th.dut.set_metadata(VerilogVerilatorImportPass.vl_Wno_list,
                          ['UNSIGNED', 'UNOPTFLAT', 'WIDTH', 'WIDTHCONCAT',
                           'ALWCOMBORDER'])
+    th.dut.set_metadata(
+      VerilogVerilatorImportPass.vl_mk_dir,
+      os.environ.get("CGRA_VERILATOR_MK_DIR", "obj_dir_conv4x4_light"),
+    )
     verilator_opts = dict(cmdline_opts)
     verilator_opts["test_verilog"] = "zeros"
     th = config_model_with_cmdline_opts(th, verilator_opts, duts = ['dut'])
@@ -520,7 +657,19 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
   trace_enabled = (os.environ.get("CGRA_TRACE_EVERY_CYCLE", "0") == "1") \
       and not use_verilator
   progress_enabled = os.environ.get("CGRA_PROGRESS_LOG", "0") == "1"
+  debug_progress_enabled = os.environ.get("CGRA_DEBUG_PROGRESS", "0") == "1"
+  debug_every = int(os.environ.get("CGRA_DEBUG_EVERY", "1000"))
+  debug_from_cycle = int(os.environ.get("CGRA_DEBUG_FROM_CYCLE", "0"))
   heartbeat_enabled = os.environ.get("CGRA_HEARTBEAT", "1") != "0"
+  debug_tile_ids = [2, 3, 5, 6, 7, 9, 10, 11]
+  debug_elem_tile_ids = [
+      int(x) for x in os.environ.get("CGRA_DEBUG_ELEM_TILES",
+                                     "2,5,6,9,10").split(",") if x
+  ]
+  debug_route_tile_ids = [
+      int(x) for x in os.environ.get("CGRA_DEBUG_ROUTE_TILES",
+                                     "2,5,6,9,10").split(",") if x
+  ]
   trace_logger = init_trace_logger(trace_file, x_tiles, y_tiles, "Mesh", cgra_id) \
       if trace_enabled else None
 
@@ -548,7 +697,219 @@ def sim_conv(cmdline_opts, mem_access_is_combinational):
             "src", int(cpu_pkt.src),
             "cmd", int(cpu_pkt.payload.cmd),
             "data", int(cpu_pkt.payload.data.payload),
+            "pred", int(cpu_pkt.payload.data.predicate),
+            "byp", int(cpu_pkt.payload.data.bypass),
+            "delay", int(cpu_pkt.payload.data.delay),
             flush=True)
+      if int(cpu_pkt.payload.data.payload) != expected_result:
+        if hasattr(th.dut, "debug_tile_times"):
+          print("[mismatch_tile6]",
+                "times", int(th.dut.debug_tile_times[6]),
+                "addr", int(th.dut.debug_tile_ctrl_addr[6]),
+                "op", int(th.dut.debug_tile_op[6]),
+                "reg0_b0", int(th.dut.debug_tile_reg0_data[6][0]),
+                "reg0_b0p", int(th.dut.debug_tile_reg0_pred[6][0]),
+                "reg0_b1", int(th.dut.debug_tile_reg0_data[6][1]),
+                "reg0_b1p", int(th.dut.debug_tile_reg0_pred[6][1]),
+                "reg_rd_b0", int(th.dut.debug_tile_reg_read_data[6][0]),
+                "reg_rd_b0p", int(th.dut.debug_tile_reg_read_pred[6][0]),
+                "reg_rd_b1", int(th.dut.debug_tile_reg_read_data[6][1]),
+                "reg_rd_b1p", int(th.dut.debug_tile_reg_read_pred[6][1]),
+                flush=True)
+        else:
+          t6 = th.dut.tile[6]
+          cm = t6.ctrl_mem
+          print("[mismatch_tile6]",
+                "raddr", int(cm.reg_file.raddr[0]),
+                "times", int(cm.times),
+                "op", int(cm.send_ctrl.msg.operation),
+                "reg0_b0", int(t6.register_cluster.debug_reg0[0].payload),
+                "reg0_b0p", int(t6.register_cluster.debug_reg0[0].predicate),
+                "reg0_b1", int(t6.register_cluster.debug_reg0[1].payload),
+                "reg0_b1p", int(t6.register_cluster.debug_reg0[1].predicate),
+                "reg_rd_b0", int(t6.register_cluster.debug_reg_read[0].payload),
+                "reg_rd_b0p", int(t6.register_cluster.debug_reg_read[0].predicate),
+                "reg_rd_b1", int(t6.register_cluster.debug_reg_read[1].payload),
+                "reg_rd_b1p", int(t6.register_cluster.debug_reg_read[1].predicate),
+                flush=True)
+      if os.environ.get("CGRA_SKIP_BAD_RETURNS", "0") != "1" or \
+         int(cpu_pkt.payload.data.payload) == expected_result:
+        assert int(cpu_pkt.payload.data.payload) == expected_result
+        assert int(cpu_pkt.payload.data.predicate) == 1
+    debug_event = False
+    if debug_progress_enabled and \
+       hasattr(th.dut, "debug_tile_elem_recv_opt_val"):
+      debug_event = cycle >= debug_from_cycle and any(
+          (int(th.dut.debug_tile_elem_recv_opt_val[tid]) and
+           int(th.dut.debug_tile_elem_recv_opt_op[tid]) in
+           (int(OPT_RET), int(OPT_GRT_PRED))) or
+          int(th.dut.debug_tile_to_ctrl_val[tid])
+          for tid in debug_tile_ids)
+    if debug_progress_enabled and \
+       ((cycle < 5) or
+        (cycle >= debug_from_cycle and debug_every > 0 and
+         cycle % debug_every == 0) or
+        debug_event):
+      cur_cmd = -1
+      cur_dst = -1
+      cur_src = -1
+      cur_data = 0
+      if int(th.src_ctrl_pkt.send.val):
+        cur_pkt = th.src_ctrl_pkt.send.msg
+        cur_cmd = int(cur_pkt.payload.cmd)
+        cur_dst = int(cur_pkt.dst)
+        cur_src = int(cur_pkt.src)
+        cur_data = int(cur_pkt.payload.data.payload)
+      print("[debug]",
+            "cycle", cycle,
+            "src_idx", th.src_ctrl_pkt.idx,
+            "src_done", th.src_ctrl_pkt.done(),
+            "src_val", int(th.src_ctrl_pkt.send.val),
+            "src_rdy", int(th.src_ctrl_pkt.send.rdy),
+            "cmd", cur_cmd,
+            "src", cur_src,
+            "dst", cur_dst,
+            "data", cur_data,
+            "preload", int(th.preload_sent_count),
+            "drain", int(th.preload_drain_count),
+            "draining", int(th.preload_draining),
+            "complete", int(th.complete_count),
+            flush=True)
+      if hasattr(th.dut, "debug_tile_times"):
+        tile_parts = []
+        for tid in debug_tile_ids:
+          tile_parts.append(
+              f"t{tid}:tm{int(th.dut.debug_tile_times[tid])}"
+              f"a{int(th.dut.debug_tile_ctrl_addr[tid])}"
+              f"op{int(th.dut.debug_tile_op[tid])}"
+              f"p{int(th.dut.debug_tile_prologue_count_fu[tid])}"
+              f"v{int(th.dut.debug_tile_send_ctrl_val[tid])}"
+              f"r{int(th.dut.debug_tile_send_ctrl_rdy[tid])}"
+              f"s{int(th.dut.debug_tile_start[tid])}"
+              f"tc{int(th.dut.debug_tile_to_ctrl_val[tid])}"
+              f"/{int(th.dut.debug_tile_to_ctrl_cmd[tid])}"
+              f"/{int(th.dut.debug_tile_to_ctrl_data[tid])}"
+              f".{int(th.dut.debug_tile_to_ctrl_pred[tid])}"
+          )
+        print("[debug_tiles]", "cycle", cycle, " | ".join(tile_parts),
+              flush=True)
+      if hasattr(th.dut, "debug_tile_elem_recv_opt_val"):
+        elem_parts = []
+        for tid in debug_elem_tile_ids:
+          in_parts = []
+          for i in range(num_fu_inports):
+            in_parts.append(
+                f"i{i}{int(th.dut.debug_tile_elem_recv_in_val[tid][i])}"
+                f"{int(th.dut.debug_tile_elem_recv_in_rdy[tid][i])}"
+                f":{int(th.dut.debug_tile_elem_recv_in_data[tid][i])}"
+                f".{int(th.dut.debug_tile_elem_recv_in_pred[tid][i])}"
+            )
+          out_parts = []
+          for i in range(num_fu_outports):
+            out_parts.append(
+                f"o{i}{int(th.dut.debug_tile_elem_send_out_val[tid][i])}"
+                f"{int(th.dut.debug_tile_elem_send_out_rdy[tid][i])}"
+                f":{int(th.dut.debug_tile_elem_send_out_data[tid][i])}"
+                f".{int(th.dut.debug_tile_elem_send_out_pred[tid][i])}"
+            )
+          elem_parts.append(
+              f"t{tid}:eop{int(th.dut.debug_tile_elem_recv_opt_op[tid])}"
+              f"v{int(th.dut.debug_tile_elem_recv_opt_val[tid])}"
+              f"r{int(th.dut.debug_tile_elem_recv_opt_rdy[tid])}"
+              f"fi{int(th.dut.debug_tile_elem_recv_opt_fu_in0[tid])}"
+              f",{int(th.dut.debug_tile_elem_recv_opt_fu_in1[tid])}"
+              f"vf{int(th.dut.debug_tile_elem_recv_opt_vfp[tid])}"
+              f"l{int(th.dut.debug_tile_elem_recv_opt_is_last[tid])}"
+              f"rv{int(th.dut.debug_tile_elem_selected_reached_vf[tid])}"
+              f"vc{int(th.dut.debug_tile_elem_selected_vf_counter[tid])}"
+              f"[{','.join(in_parts)}]"
+              f"[{','.join(out_parts)}]"
+              f"sc{int(th.dut.debug_tile_elem_send_ctrl_val[tid])}"
+              f"{int(th.dut.debug_tile_elem_send_ctrl_rdy[tid])}"
+              f"/{int(th.dut.debug_tile_elem_send_ctrl_cmd[tid])}"
+              f"/{int(th.dut.debug_tile_elem_send_ctrl_data[tid])}"
+              f".{int(th.dut.debug_tile_elem_send_ctrl_pred[tid])}"
+          )
+        print("[debug_elem]", "cycle", cycle, " | ".join(elem_parts),
+              flush=True)
+      if hasattr(th.dut, "debug_tile_route_recv_val"):
+        port_names = ["N", "S", "W", "E"]
+        route_parts = []
+        for tid in debug_route_tile_ids:
+          recv_parts = []
+          send_parts = []
+          for i, pname in enumerate(port_names):
+            recv_parts.append(
+                f"{pname}{int(th.dut.debug_tile_route_recv_val[tid][i])}"
+                f"{int(th.dut.debug_tile_route_recv_rdy[tid][i])}"
+                f":{int(th.dut.debug_tile_route_recv_data[tid][i])}"
+                f".{int(th.dut.debug_tile_route_recv_pred[tid][i])}"
+            )
+            send_parts.append(
+                f"{pname}{int(th.dut.debug_tile_send_val[tid][i])}"
+                f"{int(th.dut.debug_tile_send_rdy[tid][i])}"
+                f":{int(th.dut.debug_tile_send_data[tid][i])}"
+                f".{int(th.dut.debug_tile_send_pred[tid][i])}"
+            )
+          local_parts = []
+          write_parts = []
+          reg_parts = []
+          for i in range(num_fu_inports):
+            local_parts.append(
+                f"l{i}{int(th.dut.debug_tile_route_local_val[tid][i])}"
+                f"{int(th.dut.debug_tile_route_local_rdy[tid][i])}"
+                f":{int(th.dut.debug_tile_route_local_data[tid][i])}"
+                f".{int(th.dut.debug_tile_route_local_pred[tid][i])}"
+            )
+            write_parts.append(
+                f"w{i}{int(th.dut.debug_tile_reg_write_val[tid][i])}"
+                f":{int(th.dut.debug_tile_reg_write_data[tid][i])}"
+                f".{int(th.dut.debug_tile_reg_write_pred[tid][i])}"
+            )
+            if hasattr(th.dut, "debug_tile_reg0_data"):
+              reg_parts.append(
+                  f"b{i}rd:{int(th.dut.debug_tile_reg_read_data[tid][i])}"
+                  f".{int(th.dut.debug_tile_reg_read_pred[tid][i])}"
+                  f"$0:{int(th.dut.debug_tile_reg0_data[tid][i])}"
+                  f".{int(th.dut.debug_tile_reg0_pred[tid][i])}"
+              )
+          route_parts.append(
+              f"t{tid}:rin[{','.join(recv_parts)}]"
+              f"rout[{','.join(send_parts)}]"
+              f"loc[{','.join(local_parts)}]"
+              f"wr[{','.join(write_parts)}]"
+              f"reg[{','.join(reg_parts)}]"
+          )
+        print("[debug_route]", "cycle", cycle, " | ".join(route_parts),
+              flush=True)
+      if os.environ.get("CGRA_DEBUG_MEM", "0") == "1":
+        dm = th.dut.data_mem
+        bank0 = dm.memory_wrapper[0]
+        print("[debug_mem]",
+              "cycle", cycle,
+              "raddr3", int(dm.recv_raddr[3].msg),
+              "raddr3v", int(dm.recv_raddr[3].val),
+              "raddr3r", int(dm.recv_raddr[3].rdy),
+              "rdpkt3", str(dm.rd_pkt[3]),
+              "readxb0v", int(dm.read_crossbar.send[0].val),
+              "readxb0r", int(dm.read_crossbar.send[0].rdy),
+              "readxb0", str(dm.read_crossbar.send[0].msg),
+              "bank0rdv", int(bank0.recv_rd.val),
+              "bank0rdr", int(bank0.recv_rd.rdy),
+              "bank0rd", str(bank0.recv_rd.msg),
+              "bank0sendv", int(bank0.send.val),
+              "bank0sendr", int(bank0.send.rdy),
+              "bank0send", str(bank0.send.msg),
+              "resp3v", int(dm.response_crossbar.send[3].val),
+              "resp3r", int(dm.response_crossbar.send[3].rdy),
+              "resp3", str(dm.response_crossbar.send[3].msg),
+              "send3v", int(dm.send_rdata[3].val),
+              "send3r", int(dm.send_rdata[3].rdy),
+              "send3", str(dm.send_rdata[3].msg),
+              "mem6", str(bank0.memory.regs[6]),
+              "mem7", str(bank0.memory.regs[7]),
+              "mem8", str(bank0.memory.regs[8]),
+              flush=True)
     if use_verilator:
       if heartbeat_enabled and cycle and cycle % 1000 == 0:
         print(f"[heartbeat] cycle={cycle}/{MAX_CYCLES}", flush=True)

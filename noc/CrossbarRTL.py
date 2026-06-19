@@ -126,9 +126,8 @@ class CrossbarRTL(Component):
             s.all_send_accepted @= 0
 
         for i in range(num_inports):
-          # Prologued inputs are still required so a stale token present
-          # in the prologue window is dequeued, but send_required_vector
-          # suppresses forwarding it.
+          # Prologued inputs are still required so the skipped token is
+          # consumed; send_required_vector decides whether it is forwarded.
           s.recv_data[i].rdy @= reduce_and(s.recv_valid_or_prologue_allowing_vector) & \
                                 s.all_send_accepted & \
                                 s.recv_required_vector[i]

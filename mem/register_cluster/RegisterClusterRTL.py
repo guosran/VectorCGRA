@@ -42,6 +42,8 @@ class RegisterClusterRTL(Component):
     s.write_data_from_routing_crossbar = [InPort(DataType) for _ in range(num_reg_banks)]
     s.write_valid_from_routing_crossbar = [InPort(b1) for _ in range(num_reg_banks)]
     s.send_data_to_fu = [SendIfcRTL(DataType) for _ in range(num_reg_banks)]
+    s.debug_reg_read = [OutPort(DataType) for _ in range(num_reg_banks)]
+    s.debug_reg0 = [OutPort(DataType) for _ in range(num_reg_banks)]
     # Direct output from register banks towards routing crossbar (bypasses FU).
     s.send_data_to_routing_crossbar = [SendIfcRTL(DataType) for _ in range(num_reg_banks)]
 
@@ -58,6 +60,8 @@ class RegisterClusterRTL(Component):
       s.reg_bank[i].inport_valid[PORT_INDEX_ROUTING_CROSSBAR] //= s.write_valid_from_routing_crossbar[i]
       s.reg_bank[i].inport_valid[PORT_INDEX_FU_CROSSBAR] //= s.recv_data_from_fu_crossbar[i].val
       s.reg_bank[i].inport_valid[PORT_INDEX_CONST] //= s.recv_data_from_const[i].val
+      s.debug_reg_read[i] //= s.reg_bank[i].send_data.msg
+      s.debug_reg0[i] //= s.reg_bank[i].debug_reg0
 
     @update
     def update_msgs_signals():
@@ -80,10 +84,20 @@ class RegisterClusterRTL(Component):
         # Checks if data should go towards routing_xbar (2 or 3)
         reg_towards_routing_xbar = active_ctrl & \
                                     ((read_towards == kReadTowardsRoutingXbar) | (read_towards == kReadTowardsBoth))
+        ret_last_routing_write_bypass = active_ctrl & \
+            s.inport_opt.is_last_ctrl & \
+            (s.inport_opt.operation == OPT_RET) & \
+            reg_towards_fu & \
+            (s.inport_opt.write_reg_from[i] == PORT_ROUTING_CROSSBAR) & \
+            (s.inport_opt.write_reg_idx[i] == s.inport_opt.read_reg_idx[i]) & \
+            s.write_valid_from_routing_crossbar[i]
 
         # Data from register bank has priority over routing crossbar data for FU path.
         # Note: reg_bank[i].send_data.val is set based on read_reg_towards in RegisterBankRTL.
-        if s.reg_bank[i].send_data.val & reg_towards_fu:
+        if ret_last_routing_write_bypass:
+          s.send_data_to_fu[i].msg @= \
+            s.write_data_from_routing_crossbar[i]
+        elif s.reg_bank[i].send_data.val & reg_towards_fu:
           s.send_data_to_fu[i].msg @= \
             s.reg_bank[i].send_data.msg
         elif s.recv_data_from_routing_crossbar[i].val:
@@ -91,7 +105,8 @@ class RegisterClusterRTL(Component):
             s.recv_data_from_routing_crossbar[i].msg
 
         s.send_data_to_fu[i].val @= active_ctrl & \
-            s.recv_data_from_routing_crossbar[i].val | \
+            (ret_last_routing_write_bypass | \
+             s.recv_data_from_routing_crossbar[i].val) | \
             (s.reg_bank[i].send_data.val & reg_towards_fu)
         s.reg_bank[i].send_data.rdy @= s.send_data_to_fu[i].rdy
 

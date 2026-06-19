@@ -31,7 +31,8 @@ class TestHarness( Component ):
 
   def construct(s, FunctionUnit, FuList, IntraCgraPktType,
                 DataType, CtrlType, data_mem_size, ctrl_mem_size, num_inports, 
-                num_outports, src0_msgs, src1_msgs, ctrl_msgs, sink0_msgs):
+                num_outports, src0_msgs, src1_msgs, ctrl_msgs, sink0_msgs,
+                prologue_count = 0):
 
     s.src_in0 = TestSrcRTL(DataType, src0_msgs)
     s.src_in1 = TestSrcRTL(DataType, src1_msgs)
@@ -46,6 +47,9 @@ class TestHarness( Component ):
     connect(s.src_in1.send, s.dut.recv_in[1])
     connect(s.src_opt.send, s.dut.recv_opt)
     connect(s.dut.send_out[0], s.sink_out0.recv)
+    for i in range(1, num_outports):
+      s.dut.send_out[i].rdy //= 1
+    s.dut.send_to_ctrl_mem.rdy //= 1
 
     AddrType = mk_bits(clog2(data_mem_size))
     s.to_mem_raddr = [TestSinkRTL(AddrType, []) for _ in FuList]
@@ -59,6 +63,8 @@ class TestHarness( Component ):
       s.to_mem_waddr[i].recv //= s.dut.to_mem_waddr[i]
       s.to_mem_wdata[i].recv //= s.dut.to_mem_wdata[i]
       s.dut.clear[i] //= 0
+
+    s.dut.prologue_count_inport //= prologue_count
 
   def done(s):
     return s.src_in0.done() and s.src_in1.done()   and \
@@ -114,6 +120,30 @@ def test_flexible_alu():
   th = TestHarness(FU, FuList, IntraCgraPktType, DataType, CtrlType,
                    data_mem_size, ctrl_mem_size, num_inports, num_outports,
                    src_in0, src_in1, src_opt, sink_out0)
+  run_sim(th)
+
+def test_flexible_fu_prologue_suppresses_real_op():
+  FU = FlexibleFuRTL
+  FuList = [AdderRTL]
+  data_bitwidth = 16
+  data_mem_size = 2
+  ctrl_mem_size = 2
+  DataType = mk_data(data_bitwidth, 1)
+  DataAddrType = mk_bits(clog2(data_mem_size))
+  num_inports = 2
+  num_outports = 2
+  CtrlType = mk_ctrl(num_inports, num_outports)
+  CtrlAddrType = mk_bits(clog2(ctrl_mem_size))
+  CgraPayloadType = mk_cgra_payload(DataType, DataAddrType, CtrlType, CtrlAddrType)
+  IntraCgraPktType = mk_intra_cgra_pkt(1, 1, 1, CgraPayloadType)
+  FuInType = mk_bits(clog2(num_inports + 1))
+  pickRegister = [FuInType(x + 1) for x in range(num_inports)]
+
+  th = TestHarness(FU, FuList, IntraCgraPktType, DataType, CtrlType,
+                   data_mem_size, ctrl_mem_size, num_inports, num_outports,
+                   [], [],
+                   [CtrlType(OPT_ADD, pickRegister)], [],
+                   prologue_count = 1)
   run_sim(th)
 
 def test_flexible_mul():

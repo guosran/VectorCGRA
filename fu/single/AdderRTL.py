@@ -67,8 +67,6 @@ class AdderRTL(Fu):
       if s.recv_opt.val:
         if s.recv_opt.msg.operation == OPT_ADD:
           s.send_out[0].msg.payload @= s.recv_in[s.in0_idx].msg.payload + s.recv_in[s.in1_idx].msg.payload
-          # Treat a zero-valued input with false predicate as the additive
-          # identity so reduction-style accumulators can bootstrap from 0.
           if s.recv_in[s.in0_idx].msg.predicate & s.recv_in[s.in1_idx].msg.predicate:
             s.send_out[0].msg.predicate @= s.reached_vector_factor
           elif s.recv_in[s.in0_idx].msg.predicate & \
