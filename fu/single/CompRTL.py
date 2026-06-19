@@ -97,8 +97,10 @@ class CompRTL(Fu):
             s.send_out[0].msg @= s.const_one
           else:
             s.send_out[0].msg @= s.const_zero
-          s.send_out[0].msg.predicate @= s.recv_in[s.in0_idx].msg.predicate & \
-                                         s.reached_vector_factor
+          # EQ/NE_CONST is used to generate loop-control predicates. The
+          # comparison result remains valid even when the incoming data token
+          # carries a false predicate at the terminal iteration.
+          s.send_out[0].msg.predicate @= s.reached_vector_factor
           s.recv_all_val @= s.recv_in[s.in0_idx].val & s.recv_const.val
           s.send_out[0].val @= s.recv_all_val
           s.recv_in[s.in0_idx].rdy @= s.recv_all_val & s.send_out[0].rdy
