@@ -30,11 +30,15 @@ class LinkOrRTL(Component):
       # Initializes the delivered message.
       s.send.msg @= DataType()
 
-      # The messages from two sources (i.e., xbar and FU) won't be valid
-      # simultaneously (confliction would be caused if they both are valid),
-      # which is guaranteed by the compiler/software.
-      s.send.msg.predicate @= s.recv_fu.msg.predicate | s.recv_xbar.msg.predicate
-      s.send.msg.payload @= s.recv_xbar.msg.payload | s.recv_fu.msg.payload
+      # The messages from two sources (i.e., xbar and FU) should not be
+      # valid simultaneously. Gate each message with its val bit so an
+      # invalid source cannot pollute the active source.
+      if s.recv_fu.val:
+        s.send.msg.predicate @= s.send.msg.predicate | s.recv_fu.msg.predicate
+        s.send.msg.payload @= s.send.msg.payload | s.recv_fu.msg.payload
+      if s.recv_xbar.val:
+        s.send.msg.predicate @= s.send.msg.predicate | s.recv_xbar.msg.predicate
+        s.send.msg.payload @= s.send.msg.payload | s.recv_xbar.msg.payload
 
       # FIXME: bypass won't be necessary any more with separate xbar design.
       # s.send.msg.bypass @= 0

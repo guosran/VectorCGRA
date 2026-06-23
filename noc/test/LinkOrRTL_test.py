@@ -83,3 +83,22 @@ def test_simple():
   th = TestHarness(DataType, test_msgs_0, test_msgs_1, sink_msgs)
   run_sim(th)
 
+# Concrete example: FU currently carries stale payload 7 but val=0,
+# while xbar carries payload 1 with val=1. The output should be 1;
+# the invalid FU message must not be OR-ed into the active xbar message.
+def test_invalid_fu_msg_does_not_pollute_xbar_output():
+  dut = LinkOrRTL(DataType)
+  dut.elaborate()
+  dut.apply(DefaultPassGroup())
+  dut.sim_reset()
+
+  dut.recv_fu.val @= 0
+  dut.recv_fu.msg @= DataType(7, 1)
+  dut.recv_xbar.val @= 1
+  dut.recv_xbar.msg @= DataType(1, 1)
+  dut.send.rdy @= 1
+  dut.sim_eval_combinational()
+
+  assert dut.send.val == b1(1)
+  assert dut.send.msg == DataType(1, 1)
+
