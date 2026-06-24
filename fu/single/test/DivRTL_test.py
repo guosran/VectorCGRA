@@ -134,7 +134,14 @@ def test_div_rem_edge_cases(operation, input_a, input_b, expected):
   )
   run_sim(th)
 
-def test_rem_const():
+@pytest.mark.parametrize(
+  "const_value, expected",
+  [
+    (3, 2),
+    (0, 0),
+  ]
+)
+def test_rem_const(const_value, expected):
   DataType = mk_data(32, 1)
   num_inports = 4
   num_outports = 2
@@ -151,7 +158,7 @@ def test_rem_const():
   th = TestHarness(
       DivRTL, IntraCgraPktType, DataType, ConfigType,
       num_inports, num_outports, 8,
-      [DataType(8, 1)], [], [DataType(3, 1)],
-      [ctrl], [DataType(2, 1)],
+      [DataType(8, 1)], [], [DataType(const_value, 1)],
+      [ctrl], [DataType(expected, 1)],
   )
   run_sim(th)
