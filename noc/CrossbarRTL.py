@@ -58,6 +58,7 @@ class CrossbarRTL(Component):
     s.tile_id = InPort(mk_bits(clog2(num_tiles + 1)))
     s.crossbar_id = InPort(b1)
     s.compute_done = InPort(b1)
+    s.drain_when_inactive = InPort(b1)
 
     s.ctrl_addr_inport = InPort(CtrlAddrType)
 
@@ -125,12 +126,8 @@ class CrossbarRTL(Component):
             s.all_send_accepted @= 0
 
         for i in range(num_inports):
-          # Use recv_valid_or_prologue_allowing_vector for the gate so
-          # that prologued inputs (which may or may not have data) do
-          # not prevent non-prologued data from flowing.  The separate
-          # recv_required_vector (which excludes prologued inputs)
-          # ensures we never actually dequeue data from a prologued
-          # input channel.
+          # Prologued inputs are still required so the skipped token is
+          # consumed; send_required_vector decides whether it is forwarded.
           s.recv_data[i].rdy @= reduce_and(s.recv_valid_or_prologue_allowing_vector) & \
                                 s.all_send_accepted & \
                                 s.recv_required_vector[i]
@@ -156,6 +153,16 @@ class CrossbarRTL(Component):
 
         s.recv_opt.rdy @= s.all_send_accepted & \
                           reduce_and(s.recv_valid_or_prologue_allowing_vector)
+      else:
+        # Unconfigured / idle tiles must not backpressure the fabric.
+        # If traffic reaches a crossbar with no active route, treat it
+        # as a sink so stray messages can drain instead of deadlocking
+        # upstream producers. When this crossbar has already completed the
+        # current ctrl step, keep inputs backpressured so next-step tokens
+        # are not dropped while the tile waits for ctrl_proceed.
+        if s.drain_when_inactive:
+          for i in range(num_inports):
+            s.recv_data[i].rdy @= 1
 
     @update_ff
     def update_prologue_counter():
@@ -215,8 +222,8 @@ class CrossbarRTL(Component):
         if s.in_dir[i] > 0:
           # Records whether the prologue steps have already been satisfied.
           s.prologue_allowing_vector[i] @= \
-            (s.prologue_counter[s.ctrl_addr_inport][s.in_dir_local[i]] < \
-             s.prologue_count_wire[s.ctrl_addr_inport][s.in_dir_local[i]])
+            s.prologue_counter[s.ctrl_addr_inport][s.in_dir_local[i]] < \
+            s.prologue_count_wire[s.ctrl_addr_inport][s.in_dir_local[i]]
         else:
           s.prologue_allowing_vector[i] @= 1
 
@@ -248,8 +255,7 @@ class CrossbarRTL(Component):
         # (i.e., i >= num_inports) go to the FU's inports. In other words, we skip
         # the rdy checking on the FU's inports (connecting from crossbar_outport) if
         # the compute is already completed.
-        if (s.in_dir[i] > 0) & \
-           (~s.compute_done | (i < outport_towards_local_base_id)):
+        if s.in_dir[i] > 0:
           # When prologue is active for this output's input, don't
           # require the downstream channel to be ready -- we won't be
           # sending any data through it during prologue anyway.
@@ -262,7 +268,8 @@ class CrossbarRTL(Component):
     def update_valid_vector():
       s.recv_valid_vector @= 0
       for i in range(num_outports):
-        if s.in_dir[i] > 0:
+        if (s.in_dir[i] > 0) & \
+           (~s.compute_done | (i < outport_towards_local_base_id)):
           # When prologue is active for this output's input, treat the
           # input as not-valid even if data is physically present in the
           # channel.  This prevents the crossbar from asserting
@@ -283,10 +290,9 @@ class CrossbarRTL(Component):
         s.recv_required_vector[i] @= 0
 
       for i in range(num_outports):
-        # An input is required only when it feeds an output that is not
-        # being bypassed by prologue.  This matches the send_required
-        # masking above so that prologued inputs are not consumed.
-        if (s.in_dir[i] > 0) & ~s.prologue_allowing_vector[i]:
+        # Prologued inputs are still required so the skipped token is
+        # consumed; send_required_vector decides whether it is forwarded.
+        if s.in_dir[i] > 0:
           s.recv_required_vector[s.in_dir_local[i]] @= 1
 
     @update
@@ -310,4 +316,3 @@ class CrossbarRTL(Component):
     recv_str = "|".join([str(x.msg) for x in s.recv_data])
     out_str  = "|".join([str(x.msg) for x in s.send_data])
     return f"{recv_str} [{s.recv_opt.msg}] {out_str}"
-
