@@ -63,6 +63,7 @@ class TileRTL(Component):
 
     CtrlAddrType = mk_bits(clog2(ctrl_mem_size))
     DataAddrType = mk_bits(clog2(data_mem_size))
+    RegBankIdxType = mk_bits(clog2(num_fu_inports))
 
     # Interfaces.
     s.recv_data = [RecvIfcRTL(DataType)
@@ -130,6 +131,8 @@ class TileRTL(Component):
     s.fu_crossbar_done = Wire(1)
     s.routing_crossbar_done = Wire(1)
     s.routing_write_fire = [Wire(b1) for _ in range(num_fu_inports)]
+    s.routing_preserve_outport = [Wire(b1)
+                                  for _ in range(num_routing_xbar_outports)]
 
     s.cgra_id = InPort(mk_bits(max(1, clog2(num_cgras))))
     s.tile_id = InPort(mk_bits(clog2(num_tiles + 1)))
@@ -201,18 +204,24 @@ class TileRTL(Component):
           s.ctrl_mem.send_ctrl.msg.routing_xbar_outport[i]
       s.fu_crossbar.crossbar_outport[i] //= \
           s.ctrl_mem.send_ctrl.msg.fu_xbar_outport[i]
-      if i < num_tile_outports:
-        s.routing_crossbar.preserve_outport[i] //= 0
-        s.fu_crossbar.preserve_outport[i] //= 0
-      else:
-        local_idx = i - num_tile_outports
-        read_towards = s.ctrl_mem.send_ctrl.msg.read_reg_towards[local_idx]
-        s.routing_crossbar.preserve_outport[i] //= \
-            (s.ctrl_mem.send_ctrl.msg.write_reg_from[local_idx] == \
-             PORT_ROUTING_CROSSBAR) | \
-            (read_towards == READ_TOWARDS_ROUTING_XBAR) | \
-            (read_towards == READ_TOWARDS_BOTH)
-        s.fu_crossbar.preserve_outport[i] //= 0
+      s.routing_crossbar.preserve_outport[i] //= \
+          s.routing_preserve_outport[i]
+      s.fu_crossbar.preserve_outport[i] //= 0
+
+    @update
+    def up_routing_preserve_outport():
+      for i in range(num_routing_xbar_outports):
+        if i < num_tile_outports:
+          s.routing_preserve_outport[i] @= 0
+        else:
+          local_idx = RegBankIdxType(i - num_tile_outports)
+          read_towards = s.ctrl_mem.send_ctrl.msg.read_reg_towards[local_idx]
+          s.routing_preserve_outport[i] @= \
+              (s.ctrl_mem.send_ctrl.msg.operation == OPT_RET) & \
+              ((s.ctrl_mem.send_ctrl.msg.write_reg_from[local_idx] == \
+               PORT_ROUTING_CROSSBAR) | \
+              (read_towards == READ_TOWARDS_ROUTING_XBAR) | \
+              (read_towards == READ_TOWARDS_BOTH))
 
     # Connections on the `fu_crossbar`.
     for i in range(num_fu_outports):
@@ -270,6 +279,8 @@ class TileRTL(Component):
             ~is_reg_write
         s.routing_write_fire[i] @= \
             s.ctrl_mem.send_ctrl.val & \
+            (~s.ctrl_mem.send_ctrl.msg.is_last_ctrl | \
+             (s.ctrl_mem.send_ctrl.msg.operation == OPT_RET)) & \
             is_reg_write & \
             s.routing_crossbar.send_data[num_tile_outports + i].val & \
             s.routing_crossbar.send_data[num_tile_outports + i].rdy
