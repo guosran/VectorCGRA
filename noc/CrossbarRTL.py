@@ -46,6 +46,7 @@ class CrossbarRTL(Component):
 
     s.crossbar_outport = [InPort(InType) for _ in range(num_outports)]
     s.send_data = [SendIfcRTL(DataType) for _ in range(num_outports)]
+    s.preserve_outport = [InPort(b1) for _ in range(num_outports)]
 
     s.in_dir = [Wire(InType) for _ in range(num_outports)]
     s.in_dir_local = [Wire(NumInportType) for _ in range(num_outports)]
@@ -239,7 +240,8 @@ class CrossbarRTL(Component):
         # After the FU finishes, only directions toward a local consumer still
         # backpressure the crossbar; routed outputs may drain independently.
         if (s.in_dir[i] > 0) & \
-           (~s.compute_done | (i < outport_towards_local_base_id)):
+           (~s.compute_done | (i < outport_towards_local_base_id) | \
+            s.preserve_outport[i]):
           s.send_rdy_vector[i] @= s.send_data[i].rdy
         else:
           s.send_rdy_vector[i] @= 1
@@ -248,7 +250,9 @@ class CrossbarRTL(Component):
     def update_valid_vector():
       s.recv_valid_vector @= 0
       for i in range(num_outports):
-        if s.in_dir[i] > 0:
+        if (s.in_dir[i] > 0) & \
+           (~s.compute_done | (i < outport_towards_local_base_id) | \
+            s.preserve_outport[i]):
           s.recv_valid_vector[i] @= s.recv_data_val[s.in_dir_local[i]]
         else:
           s.recv_valid_vector[i] @= 1
@@ -259,7 +263,9 @@ class CrossbarRTL(Component):
         s.recv_required_vector[i] @= 0
 
       for i in range(num_outports):
-        if s.in_dir[i] > 0:
+        if (s.in_dir[i] > 0) & \
+           (~s.compute_done | (i < outport_towards_local_base_id) | \
+            s.preserve_outport[i]):
           # A prologue advances control without routing or dequeuing its input.
           s.recv_required_vector[s.in_dir_local[i]] @= \
               ~s.during_prologue_allowing_vector[i]
@@ -271,7 +277,10 @@ class CrossbarRTL(Component):
         s.send_required_vector[i] @= 0
 
       for i in range(num_outports):
-        if (s.in_dir[i] > 0) & ~s.during_prologue_allowing_vector[i]:
+        if (s.in_dir[i] > 0) & \
+           ~s.during_prologue_allowing_vector[i] & \
+           (~s.compute_done | (i < outport_towards_local_base_id) | \
+            s.preserve_outport[i]):
           s.send_required_vector[i] @= 1
 
 

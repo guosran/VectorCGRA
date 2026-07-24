@@ -201,6 +201,18 @@ class TileRTL(Component):
           s.ctrl_mem.send_ctrl.msg.routing_xbar_outport[i]
       s.fu_crossbar.crossbar_outport[i] //= \
           s.ctrl_mem.send_ctrl.msg.fu_xbar_outport[i]
+      if i < num_tile_outports:
+        s.routing_crossbar.preserve_outport[i] //= 0
+        s.fu_crossbar.preserve_outport[i] //= 0
+      else:
+        local_idx = i - num_tile_outports
+        read_towards = s.ctrl_mem.send_ctrl.msg.read_reg_towards[local_idx]
+        s.routing_crossbar.preserve_outport[i] //= \
+            (s.ctrl_mem.send_ctrl.msg.write_reg_from[local_idx] == \
+             PORT_ROUTING_CROSSBAR) | \
+            (read_towards == READ_TOWARDS_ROUTING_XBAR) | \
+            (read_towards == READ_TOWARDS_BOTH)
+        s.fu_crossbar.preserve_outport[i] //= 0
 
     # Connections on the `fu_crossbar`.
     for i in range(num_fu_outports):
