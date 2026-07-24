@@ -243,7 +243,6 @@ class TileRTL(Component):
       for i in range(num_fu_inports):
         s.routing_write_fire[i] @= \
             s.ctrl_mem.send_ctrl.val & \
-            (s.ctrl_mem.send_ctrl.msg.operation == OPT_RET) & \
             (s.ctrl_mem.send_ctrl.msg.write_reg_from[i] == PORT_ROUTING_CROSSBAR) & \
             s.routing_crossbar.send_data[num_tile_outports + i].val & \
             s.routing_crossbar.send_data[num_tile_outports + i].rdy
